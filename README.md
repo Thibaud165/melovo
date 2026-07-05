@@ -30,7 +30,7 @@ hors-ligne** (aucun CDN : polices, icônes et scripts sont self-hostés).
 ## Installation
 
 ```bash
-git clone https://github.com/<votre-compte>/melovo.git
+git clone https://github.com/Thibaud165/melovo.git
 cd melovo
 
 # Configuration
@@ -61,7 +61,7 @@ depuis votre tailnet, sans exposition publique.
 
 ## Accès
 
-- **Réseau local** : `http://192.168.1.50:8080`
+- **Réseau local** : `http://192.168.1.10:8080`
 - **Tailscale** : `http://100.95.29.38:8080`
 - Version générique : `http://<IP-de-votre-Pi>:<PORT>` — l'IP Tailscale
   s'obtient avec `tailscale ip -4`.
