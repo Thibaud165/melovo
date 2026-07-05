@@ -1,0 +1,17 @@
+services:
+  melovo:
+    build: .
+    container_name: melovo
+    restart: unless-stopped
+    ports:
+      # Écoute sur toutes les interfaces : accessible en LAN et via Tailscale.
+      - "${PORT:-8080}:${PORT:-8080}"
+    environment:
+      - PORT=${PORT:-8080}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - DATA_DIR=/app/data
+    volumes:
+      # Tout l'état persistant (audio, pochettes, base SQLite) vit ici.
+      - ./data:/app/data

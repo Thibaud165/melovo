@@ -1,0 +1,22 @@
+{
+  "name": "melovo",
+  "version": "1.0.0",
+  "description": "Mini Spotify auto-hébergé : importe, gère et écoute ta musique en local.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "argon2": "^0.41.1",
+    "better-sqlite3": "^11.10.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "express-session": "^1.18.1",
+    "multer": "^2.2.0",
+    "sharp": "^0.33.5"
+  }
+}
