@@ -72,10 +72,10 @@ export function modal({ title, content, wide = false }) {
   const root = document.getElementById('modal-root');
   const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = (e) => { if (e.key === 'Escape') close(); };
-  const overlay = h('div', {
-    class: 'modal-overlay',
-    onclick: (e) => { if (e.target === overlay) close(); },
-  },
+  // Volontairement PAS de fermeture au clic sur l'overlay : un clic à côté par
+  // mégarde ne doit jamais faire perdre un formulaire (fermeture via ×,
+  // Annuler/Enregistrer ou Échap uniquement).
+  const overlay = h('div', { class: 'modal-overlay' },
     h('div', { class: `modal${wide ? ' modal-wide' : ''}`, role: 'dialog', 'aria-label': title },
       h('div', { class: 'modal-head' },
         h('h2', {}, title),
@@ -103,7 +103,12 @@ export function confirmDialog(message, { confirmLabel = 'Confirmer', danger = fa
 
 // ------------------------------------------------------------------ Menus contextuels
 let openMenuEl = null;
-document.addEventListener('click', () => { openMenuEl?.remove(); openMenuEl = null; });
+let menuJustOpened = false; // le clic qui OUVRE le menu ne doit pas le refermer en remontant
+document.addEventListener('click', () => {
+  if (menuJustOpened) return;
+  openMenuEl?.remove();
+  openMenuEl = null;
+});
 
 /**
  * Menu déroulant ancré à un élément.
@@ -111,6 +116,8 @@ document.addEventListener('click', () => { openMenuEl?.remove(); openMenuEl = nu
  */
 export function openMenu(anchor, items) {
   openMenuEl?.remove();
+  menuJustOpened = true;
+  setTimeout(() => { menuJustOpened = false; }, 0);
   const menu = h('div', { class: 'menu', role: 'menu' },
     items.filter(Boolean).map((it) =>
       h('button', {

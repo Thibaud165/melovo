@@ -79,6 +79,19 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sessions_expires   ON sessions(expires);
 `);
 
+// Migrations légères : colonnes ajoutées après la v1 (base existante -> ALTER).
+// Toutes non destructives : ajout de colonnes nullables uniquement.
+const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+if (!userCols.includes('theme_color')) {
+  // Couleur de fond du thème (null = base espresso par défaut).
+  db.exec('ALTER TABLE users ADD COLUMN theme_color TEXT');
+}
+const songCols = db.prepare('PRAGMA table_info(songs)').all().map((c) => c.name);
+if (!songCols.includes('sort_order')) {
+  // Ordre manuel dans la bibliothèque (null = pas encore rangé -> tri par date).
+  db.exec('ALTER TABLE songs ADD COLUMN sort_order INTEGER');
+}
+
 /** Seed du compte admin au premier démarrage, depuis le .env. */
 export async function seedAdmin(username, password) {
   if (!username || !password) {

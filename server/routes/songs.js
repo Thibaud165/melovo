@@ -20,9 +20,26 @@ const coverUpload = multer({
 
 // Ma bibliothèque générale = tous les sons dont je suis propriétaire.
 router.get('/library', (req, res) => {
-  const rows = db.prepare(`${SONG_SELECT} WHERE s.owner_id = ? ORDER BY s.created_at DESC, s.id DESC`)
+  // Ordre : d'abord les titres rangés manuellement (sort_order), puis les
+  // nouveaux imports (sort_order NULL) en tête par date de création.
+  const rows = db.prepare(`${SONG_SELECT} WHERE s.owner_id = ?
+    ORDER BY (s.sort_order IS NULL) DESC, s.sort_order ASC, s.created_at DESC, s.id DESC`)
     .all(req.session.userId);
   res.json({ songs: rows.map((r) => serializeSong(r, req.session.userId)) });
+});
+
+// Réordonnancement de MA bibliothèque (drag & drop) : liste des song_id
+// dans le nouvel ordre. On réindexe uniquement mes titres.
+router.put('/library/order', (req, res) => {
+  const ids = req.body?.song_ids;
+  if (!Array.isArray(ids) || !ids.every((n) => Number.isInteger(n))) {
+    return res.status(400).json({ error: 'Ordre invalide.' });
+  }
+  const update = db.prepare('UPDATE songs SET sort_order = ? WHERE id = ? AND owner_id = ?');
+  db.transaction(() => {
+    ids.forEach((id, i) => update.run(i + 1, id, req.session.userId));
+  })();
+  res.json({ ok: true });
 });
 
 // Streaming audio avec support des HTTP Range requests (seek dans le lecteur).

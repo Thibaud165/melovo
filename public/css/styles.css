@@ -105,9 +105,12 @@ img { display: block; }
 .layout {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
+  /* minmax(0, 1fr) borne la rangée à la hauteur dispo : sans ça, une longue
+     liste fait grandir la rangée et empêche .main de scroller. */
+  grid-template-rows: minmax(0, 1fr);
   height: calc(100vh - var(--player-h));
 }
-.main-wrap { display: flex; flex-direction: column; min-width: 0; }
+.main-wrap { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 
 /* Sidebar */
 .sidebar {
@@ -484,6 +487,29 @@ img { display: block; }
 .color-custom::-webkit-color-swatch-wrapper { padding: 0; }
 .color-custom::-webkit-color-swatch { border-radius: 50%; border: 1px solid var(--border); }
 
+/* Pastille « couleur personnalisée » : crayon par-dessus un color input caché. */
+.color-custom-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--text);
+  overflow: hidden;
+  cursor: pointer;
+}
+.color-custom-wrap.selected { border-color: var(--text); box-shadow: 0 0 0 2px var(--accent); }
+.color-custom-pencil { display: inline-flex; pointer-events: none; }
+/* L'input color natif couvre la pastille mais reste invisible (on clique dessus). */
+.color-custom-input {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  opacity: 0;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
 /* ---------- Modales ---------- */
 .modal-overlay {
   position: fixed;
@@ -749,6 +775,9 @@ img { display: block; }
 .settings-actions { margin-top: 16px; }
 .settings-form { max-width: 360px; }
 
+/* La liste des comptes a besoin de plus de largeur que les autres blocs. */
+.settings-section.admin-accounts { max-width: 960px; }
+
 .admin-create-fields { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
 .admin-create-fields > div { flex: 1; min-width: 180px; }
 .admin-create .muted { margin-top: 8px; }
@@ -756,10 +785,18 @@ img { display: block; }
 .admin-list { display: flex; flex-direction: column; }
 .admin-row {
   display: grid;
-  grid-template-columns: minmax(140px, 2fr) 90px minmax(120px, 2fr) minmax(120px, 2fr) auto;
+  /* Minimums serrés (somme ~536px + gaps) pour tenir même dans un bloc étroit ;
+     les fr laissent respirer sur grand écran. La colonne Actions ne descend pas
+     sous la largeur de ses deux boutons. */
+  grid-template-columns:
+    minmax(120px, 2.2fr)  /* Compte */
+    minmax(64px, 0.9fr)   /* Créé */
+    minmax(96px, 1.5fr)   /* Contenu */
+    minmax(80px, 1.1fr)   /* État */
+    minmax(176px, auto);  /* Actions */
   gap: 12px;
   align-items: center;
-  padding: 10px 8px;
+  padding: 12px 8px;
   border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
@@ -771,8 +808,25 @@ img { display: block; }
   letter-spacing: 0.08em;
   color: var(--text-dim);
 }
+.admin-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.admin-row .badge { white-space: nowrap; }
 .admin-user { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
-.admin-actions { display: flex; gap: 8px; }
+.admin-user > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-actions { display: flex; gap: 8px; justify-content: flex-end; overflow: visible; }
+.admin-actions .btn { white-space: nowrap; }
+
+/* Bloc trop étroit pour 5 colonnes : la liste passe en cartes empilées
+   (plus de chevauchement ni de bouton qui déborde). */
+@media (max-width: 1040px) {
+  .admin-head { display: none; }
+  .admin-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 16px 8px;
+  }
+  .admin-user { font-size: 15px; }
+  .admin-actions { justify-content: flex-start; margin-top: 8px; }
+}
 .badge {
   display: inline-flex;
   align-items: center;

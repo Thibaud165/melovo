@@ -22,10 +22,14 @@ export async function playlistView(root, id) {
   const rerender = async () => { root.innerHTML = ''; await playlistView(root, id); };
 
   // Recharge si un titre est ajouté depuis un menu ailleurs dans la page.
+  // Un seul écouteur par conteneur : les re-rendus remplacent le précédent
+  // (sinon chaque re-rendu empilerait un écouteur -> rendus dupliqués).
   const onExternalChange = (e) => {
     if (!root.isConnected) return document.removeEventListener('melovo:playlist-changed', onExternalChange);
     if (e.detail.id === playlist.id) rerender();
   };
+  if (root._onPlaylistChange) document.removeEventListener('melovo:playlist-changed', root._onPlaylistChange);
+  root._onPlaylistChange = onExternalChange;
   document.addEventListener('melovo:playlist-changed', onExternalChange);
 
   const play = h('button', { class: 'play-hero', 'aria-label': 'Lire', html: icon('play', 24),

@@ -1,7 +1,7 @@
 // Shell de l'application : boot, écran de connexion, changement de mot de passe
 // forcé, layout (sidebar + topbar + lecteur) et routeur par hash.
 import { api } from './api.js';
-import { state, refreshPlaylists, applyAccent } from './state.js';
+import { state, refreshPlaylists, applyAccent, applyTheme } from './state.js';
 import { h, toast, openMenu, avatar, cover } from './ui.js';
 import { icon } from './icons.js';
 import { renderPlayer } from './player.js';
@@ -28,6 +28,7 @@ async function boot() {
 function onLoggedIn(user) {
   state.me = user;
   applyAccent(user.accent_color);
+  applyTheme(user.theme_color);
   if (user.must_change_password) renderChangePassword();
   else startApp();
 }
@@ -42,6 +43,7 @@ async function startApp() {
 
 document.addEventListener('melovo:unauthorized', () => {
   state.me = null;
+  applyTheme(null); // retour au thème par défaut sur l'écran de connexion
   renderLogin();
 });
 document.addEventListener('melovo:playerror', () =>
@@ -180,6 +182,7 @@ function accountMenu(anchor) {
       await api.post('/api/auth/logout').catch(() => {});
       document.getElementById('audio').pause();
       state.me = null;
+      applyTheme(null);
       renderLogin();
     } },
   ]);
@@ -207,12 +210,17 @@ async function route() {
   document.querySelectorAll('.nav-item').forEach((a) =>
     a.classList.toggle('active', a.dataset.route === hash));
 
+  // Chaque vue est montée dans un conteneur NEUF : à la navigation suivante,
+  // l'ancien conteneur quitte le DOM et ses écouteurs auto-nettoyés se retirent
+  // (sinon les vues précédentes continueraient de réagir aux événements).
   main.innerHTML = '';
   main.scrollTop = 0;
+  const page = h('div', { class: 'page' });
+  main.append(page);
   for (const [re, getView] of routes) {
     const m = hash.match(re);
     if (m) {
-      try { await getView()(main, m[1]); }
+      try { await getView()(page, m[1]); }
       catch (ex) { if (ex.status !== 401) toast(ex.message, 'error'); }
       return;
     }

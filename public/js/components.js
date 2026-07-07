@@ -127,10 +127,13 @@ export async function saveToLibrary(song, onDone) {
  * Table des pistes façon Spotify.
  * options :
  *  - canReorder / canRemove : droits sur la playlist affichée
- *  - onRemove(trackId), onReorder(trackIds), onChanged() : callbacks
+ *  - reorderMode : 'track' (playlist, réordonne par track_id) ou 'song'
+ *    (bibliothèque, réordonne par song.id)
+ *  - onRemove(trackId), onReorder(ids), onChanged() : callbacks
  */
 export function trackTable(items, opts = {}) {
-  const { canReorder = false, canRemove = false, onRemove, onReorder, onChanged } = opts;
+  const { canReorder = false, canRemove = false, reorderMode = 'track',
+    onRemove, onReorder, onChanged } = opts;
   const songs = items.map((it) => it.song);
 
   const head = h('div', { class: 'track-row track-head' },
@@ -157,6 +160,7 @@ export function trackTable(items, opts = {}) {
     const row = h('div', {
       class: 'track-row',
       'data-track-id': it.track_id ?? '',
+      'data-song-id': song.id,
       ondblclick: () => player.playContext(songs, i),
     },
       num,
@@ -190,7 +194,13 @@ export function trackTable(items, opts = {}) {
     document.addEventListener('melovo:trackchange', onTrackChange);
 
     if (canReorder) enableDrag(row, list, () => {
-      const ids = [...list.children].map((r) => Number(r.dataset.trackId));
+      const attr = reorderMode === 'song' ? 'songId' : 'trackId';
+      // Renumérote les lignes dans le nouvel ordre (pas de re-render complet).
+      [...list.children].forEach((r, idx) => {
+        const n = r.querySelector('.num');
+        if (n) n.textContent = String(idx + 1);
+      });
+      const ids = [...list.children].map((r) => Number(r.dataset[attr]));
       onReorder?.(ids);
     });
 

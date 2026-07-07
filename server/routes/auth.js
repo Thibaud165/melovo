@@ -24,6 +24,7 @@ function publicUser(u) {
     is_admin: !!u.is_admin,
     must_change_password: !!u.must_change_password,
     accent_color: u.accent_color,
+    theme_color: u.theme_color ?? null,
   };
 }
 
@@ -83,6 +84,16 @@ router.put('/accent', requireAuth, (req, res) => {
   }
   db.prepare('UPDATE users SET accent_color = ? WHERE id = ?').run(color, req.session.userId);
   res.json({ ok: true, accent_color: color });
+});
+
+// Couleur de fond du thème (null / vide = retour à la base espresso par défaut).
+router.put('/theme', requireAuth, (req, res) => {
+  const color = parseHexColor(req.body?.theme_color); // null accepté = défaut
+  if (color === undefined) {
+    return res.status(400).json({ error: 'Couleur invalide (format attendu : #RRGGBB).' });
+  }
+  db.prepare('UPDATE users SET theme_color = ? WHERE id = ?').run(color, req.session.userId);
+  res.json({ ok: true, theme_color: color });
 });
 
 export default router;

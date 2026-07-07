@@ -74,7 +74,7 @@ async function renderUsers(container) {
             } }, 'Supprimer')
           : null))));
 
-  container.append(h('section', { class: 'settings-section' },
+  container.append(h('section', { class: 'settings-section admin-accounts' },
     h('h2', { class: 'section-title' }, `Comptes (${users.length})`), list));
 }
 

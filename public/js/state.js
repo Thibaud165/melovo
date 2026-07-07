@@ -53,3 +53,30 @@ export function applyAccent(hex) {
   root.setProperty('--accent-dim', hslToHex(h, Math.max(s - 10, 0), Math.max(l - 18, 8)));
   root.setProperty('--focus-ring', hex + '66'); // ~40 % d'opacité
 }
+
+/**
+ * Applique la couleur de fond du thème : on ne garde que la TEINTE (et une
+ * saturation adoucie) de la couleur choisie, puis on regénère toute la gamme
+ * (fond, sidebar/barre de lecture, surfaces, filets) avec les mêmes écarts de
+ * luminosité que la base espresso — les nuances entre sections sont préservées.
+ * `null` -> retour à la base espresso par défaut.
+ */
+export function applyTheme(hex) {
+  const root = document.documentElement.style;
+  const vars = ['--bg', '--bg-elevated', '--surface', '--surface-hover', '--border'];
+  if (!hex) { vars.forEach((v) => root.removeProperty(v)); return; }
+  const [h, s] = hexToHsl(hex);
+  const sat = Math.min(Math.max(s, 6), 30); // teinte présente mais jamais criarde
+  // Gamme calquée sur l'espresso : L 7.5 / 10 / 12 / 15 / 19, S +1 par palier.
+  root.setProperty('--bg', hslToHex(h, sat, 7.5));
+  root.setProperty('--bg-elevated', hslToHex(h, sat + 1, 10));
+  root.setProperty('--surface', hslToHex(h, sat + 2, 12));
+  root.setProperty('--surface-hover', hslToHex(h, sat + 3, 15));
+  root.setProperty('--border', hslToHex(h, sat + 4, 19));
+}
+
+/** Pastille d'aperçu lisible pour une couleur de thème (même teinte, plus claire). */
+export function themeSwatchColor(hex) {
+  const [h, s] = hexToHsl(hex);
+  return hslToHex(h, Math.min(Math.max(s, 6), 30) + 6, 26);
+}

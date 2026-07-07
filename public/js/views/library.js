@@ -1,7 +1,7 @@
 // Vue « Ma bibliothèque » : tous mes titres. Non supprimable, non renommable.
 import { api } from '../api.js';
 import { state } from '../state.js';
-import { h, fmtTotal, emptyState } from '../ui.js';
+import { h, fmtTotal, emptyState, toast } from '../ui.js';
 import { icon } from '../icons.js';
 import { trackTable, collectionHeader } from '../components.js';
 import * as player from '../player.js';
@@ -39,6 +39,13 @@ export async function libraryView(root) {
   }
 
   root.append(trackTable(items, {
+    canReorder: true,          // glisser-déposer pour ranger sa bibliothèque
+    reorderMode: 'song',       // on réordonne par song.id (pas de track_id ici)
     onChanged: async () => { root.innerHTML = ''; await libraryView(root); },
+    onReorder: async (songIds) => {
+      // Persistance silencieuse : le DOM reflète déjà le nouvel ordre.
+      try { await api.put('/api/songs/library/order', { song_ids: songIds }); }
+      catch (ex) { toast(ex.message, 'error'); root.innerHTML = ''; await libraryView(root); }
+    },
   }));
 }
