@@ -152,6 +152,8 @@ export function trackTable(items, opts = {}) {
 
     const num = h('span', { class: 'col-num mono' },
       h('span', { class: 'num' }, String(i + 1)),
+      // Égaliseur animé dans la colonne du numéro (remplace le n° pendant la lecture).
+      h('span', { class: 'eq', html: '<i></i><i></i><i></i>' }),
       h('button', { class: 'btn-icon row-play', 'aria-label': 'Lire',
         html: icon('play', 16),
         onclick: (e) => { e.stopPropagation(); player.playContext(songs, i); } }),
@@ -167,9 +169,7 @@ export function trackTable(items, opts = {}) {
       h('span', { class: 'col-title' },
         cover(song.cover_url, 40, 18),
         h('span', { class: 'title-block' },
-          h('span', { class: 'track-title' },
-            song.title,
-            h('span', { class: 'eq', html: '<i></i><i></i><i></i>' })),
+          h('span', { class: 'track-title' }, song.title),
           song.artist ? h('span', { class: 'track-artist' }, song.artist) : null)),
       h('span', { class: 'col-user' },
         avatar(it.added_by_name ?? song.owner_name, 24),

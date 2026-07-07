@@ -174,8 +174,14 @@ export function renderPlayer(root) {
   a.volume = Number(localStorage.getItem('melovo.volume') ?? 1);
   a.addEventListener('timeupdate', updateProgress);
   a.addEventListener('durationchange', updateProgress);
-  a.addEventListener('play', updateBar);
-  a.addEventListener('pause', updateBar);
+  // play/pause : rafraîchit la barre ET notifie les lignes (surlignage + égaliseur
+  // qui s'arrête à la pause).
+  const onPlayState = () => {
+    updateBar();
+    document.dispatchEvent(new CustomEvent('melovo:trackchange'));
+  };
+  a.addEventListener('play', onPlayState);
+  a.addEventListener('pause', onPlayState);
   a.addEventListener('ended', () => next(true));
   a.addEventListener('error', () => {
     if (player.song) document.dispatchEvent(new CustomEvent('melovo:playerror'));
