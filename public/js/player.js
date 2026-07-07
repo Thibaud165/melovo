@@ -1,7 +1,9 @@
 // Lecteur audio : un seul <audio> persistant dans le shell, file d'attente,
-// shuffle / repeat (one & all), seek via HTTP Range, barre fixe en bas.
+// shuffle / repeat (one & all), seek via HTTP Range.
+// Deux surfaces : barre fixe (desktop) et mini-lecteur + plein écran (mobile).
 import { h, fmtTime, cover } from './ui.js';
 import { icon } from './icons.js';
+import { isMobile, recordPlay } from './state.js';
 
 const audio = () => document.getElementById('audio');
 
@@ -14,7 +16,9 @@ const player = {
   song: null,
 };
 
-let els = null; // références DOM de la barre (après render)
+let els = null;     // références DOM de la surface active (barre ou mini-lecteur)
+let npEls = null;   // références du plein écran « Lecture en cours » (si ouvert)
+let wired = false;  // câblage audio/clavier/mediaSession fait une seule fois
 
 export function currentSongId() { return player.song?.id ?? null; }
 export function isPlaying() { return player.song && !audio().paused; }
@@ -52,6 +56,7 @@ function loadCurrent(autoplay) {
   const a = audio();
   a.src = song.audio_url;
   if (autoplay) a.play().catch(() => {});
+  recordPlay('song', song.id);
   updateBar();
   updateMediaSession(song);
   document.dispatchEvent(new CustomEvent('melovo:trackchange'));
@@ -124,36 +129,39 @@ export function removeSong(songId) {
 }
 
 // ------------------------------------------------------------------ Rendu
-/** Construit la barre de lecture (appelé une fois par le shell). */
+/** Construit la surface de lecture adaptée (barre desktop ou mini mobile). */
 export function renderPlayer(root) {
   root.innerHTML = '';
+  els = isMobile() ? renderMini(root) : renderDesktopBar(root);
+  wireAudioOnce();
+  updateBar();
+}
+
+function renderDesktopBar(root) {
   const bar = h('div', { class: 'player' },
-    // Gauche : pochette + titre + artiste + indicateur bibliothèque
     h('div', { class: 'player-left' },
       h('div', { class: 'player-cover' }),
       h('div', { class: 'player-meta' },
         h('div', { class: 'player-title' }, '—'),
         h('div', { class: 'player-artist' }, '')),
       h('span', { class: 'player-saved', title: 'Dans votre bibliothèque', html: icon('check-circle-2', 16) })),
-    // Centre : contrôles
     h('div', { class: 'player-center' },
       ctrl('shuffle', 'shuffle', 'Lecture aléatoire', toggleShuffle),
       ctrl('prev', 'skip-back', 'Précédent', prev),
       h('button', { class: 'player-play', 'aria-label': 'Lecture / pause', onclick: togglePlay, html: icon('play', 20) }),
       ctrl('next', 'skip-forward', 'Suivant', () => next(false)),
       ctrl('repeat', 'repeat', 'Répéter', cycleRepeat)),
-    // Droite : progression + volume
     h('div', { class: 'player-right' },
       h('span', { class: 'player-time mono' }, '0:00'),
-      h('div', { class: 'slider progress', onclick: onSeek, onmousedown: dragSeek },
+      h('div', { class: 'slider progress', onpointerdown: seekPointer },
         h('div', { class: 'slider-fill' }, h('span', { class: 'slider-thumb' }))),
       h('span', { class: 'player-duration mono' }, '0:00'),
       h('button', { class: 'btn-icon player-mute', 'aria-label': 'Couper le son', onclick: toggleMute, html: icon('volume-2', 18) }),
-      h('div', { class: 'slider volume', onclick: onVolume, onmousedown: dragVolume },
+      h('div', { class: 'slider volume', onpointerdown: volumePointer },
         h('div', { class: 'slider-fill' }, h('span', { class: 'slider-thumb' })))));
   root.append(bar);
-
-  els = {
+  return {
+    kind: 'desktop',
     cover: bar.querySelector('.player-cover'),
     title: bar.querySelector('.player-title'),
     artist: bar.querySelector('.player-artist'),
@@ -169,25 +177,98 @@ export function renderPlayer(root) {
     volumeFill: bar.querySelector('.volume .slider-fill'),
     mute: bar.querySelector('.player-mute'),
   };
+}
 
+// Mini-lecteur mobile : pochette + titre + play/pause + suivant + fine barre.
+// Un appui (hors boutons) ouvre le plein écran « Lecture en cours ».
+function renderMini(root) {
+  const bar = h('div', { class: 'miniplayer', role: 'button', 'aria-label': 'Ouvrir le lecteur',
+    onclick: (e) => { if (!e.target.closest('button')) openNowPlaying(); } },
+    h('div', { class: 'mini-cover' }),
+    h('div', { class: 'mini-meta' },
+      h('div', { class: 'mini-title' }, '—'),
+      h('div', { class: 'mini-artist' }, '')),
+    h('button', { class: 'mini-btn', 'aria-label': 'Lecture / pause', onclick: togglePlay, html: icon('play', 22) }),
+    h('button', { class: 'mini-btn', 'aria-label': 'Suivant', onclick: () => next(false), html: icon('skip-forward', 20) }),
+    h('div', { class: 'mini-progress' }, h('div', { class: 'mini-progress-fill' })));
+  root.append(bar);
+  return {
+    kind: 'mini',
+    cover: bar.querySelector('.mini-cover'),
+    title: bar.querySelector('.mini-title'),
+    artist: bar.querySelector('.mini-artist'),
+    play: bar.querySelector('.mini-btn'),
+    progressFill: bar.querySelector('.mini-progress-fill'),
+  };
+}
+
+// Plein écran « Lecture en cours » (mobile) : grande pochette, seek, contrôles.
+function openNowPlaying() {
+  if (!player.song || npEls) return;
+  const sheet = h('div', { class: 'nowplaying' },
+    h('header', { class: 'np-head' },
+      h('button', { class: 'btn-icon', 'aria-label': 'Fermer', html: icon('arrow-left', 22),
+        onclick: closeNowPlaying }),
+      h('span', { class: 'np-label' }, 'Lecture en cours'),
+      h('span', { style: 'width:32px' })),
+    h('div', { class: 'np-cover' }),
+    h('div', { class: 'np-meta' },
+      h('div', { class: 'np-title' }),
+      h('div', { class: 'np-artist' })),
+    h('div', { class: 'np-seek' },
+      h('div', { class: 'slider np-progress', onpointerdown: seekPointer },
+        h('div', { class: 'slider-fill' }, h('span', { class: 'slider-thumb' }))),
+      h('div', { class: 'np-times' },
+        h('span', { class: 'np-time mono' }, '0:00'),
+        h('span', { class: 'np-duration mono' }, '0:00'))),
+    h('div', { class: 'np-controls' },
+      ctrl('shuffle', 'shuffle', 'Lecture aléatoire', toggleShuffle, 24),
+      h('button', { class: 'btn-icon np-ctrl', 'aria-label': 'Précédent', onclick: prev, html: icon('skip-back', 30) }),
+      h('button', { class: 'np-play', 'aria-label': 'Lecture / pause', onclick: togglePlay, html: icon('play', 30) }),
+      h('button', { class: 'btn-icon np-ctrl', 'aria-label': 'Suivant', onclick: () => next(false), html: icon('skip-forward', 30) }),
+      ctrl('repeat', 'repeat', 'Répéter', cycleRepeat, 24)));
+  document.getElementById('modal-root').append(sheet);
+
+  npEls = {
+    sheet,
+    cover: sheet.querySelector('.np-cover'),
+    title: sheet.querySelector('.np-title'),
+    artist: sheet.querySelector('.np-artist'),
+    play: sheet.querySelector('.np-play'),
+    shuffle: sheet.querySelector('[data-ctrl=shuffle]'),
+    repeat: sheet.querySelector('[data-ctrl=repeat]'),
+    time: sheet.querySelector('.np-time'),
+    duration: sheet.querySelector('.np-duration'),
+    progress: sheet.querySelector('.np-progress'),
+    progressFill: sheet.querySelector('.np-progress .slider-fill'),
+  };
+  updateNowPlaying();
+  updateNpProgress();
+  document.addEventListener('melovo:trackchange', updateNowPlaying);
+}
+
+function closeNowPlaying() {
+  if (!npEls) return;
+  npEls.sheet.remove();
+  document.removeEventListener('melovo:trackchange', updateNowPlaying);
+  npEls = null;
+}
+
+function wireAudioOnce() {
+  if (wired) return;
+  wired = true;
   const a = audio();
   a.volume = Number(localStorage.getItem('melovo.volume') ?? 1);
-  a.addEventListener('timeupdate', updateProgress);
-  a.addEventListener('durationchange', updateProgress);
-  // play/pause : rafraîchit la barre ET notifie les lignes (surlignage + égaliseur
-  // qui s'arrête à la pause).
-  const onPlayState = () => {
-    updateBar();
-    document.dispatchEvent(new CustomEvent('melovo:trackchange'));
-  };
+  a.addEventListener('timeupdate', () => { updateProgress(); updateNpProgress(); });
+  a.addEventListener('durationchange', () => { updateProgress(); updateNpProgress(); });
+  // play/pause : rafraîchit la surface ET notifie les lignes (surlignage + égaliseur).
+  const onPlayState = () => { updateBar(); document.dispatchEvent(new CustomEvent('melovo:trackchange')); };
   a.addEventListener('play', onPlayState);
   a.addEventListener('pause', onPlayState);
   a.addEventListener('ended', () => next(true));
-  a.addEventListener('error', () => {
-    if (player.song) document.dispatchEvent(new CustomEvent('melovo:playerror'));
-  });
+  a.addEventListener('error', () => { if (player.song) document.dispatchEvent(new CustomEvent('melovo:playerror')); });
 
-  // Raccourci espace = play/pause (hors champs de saisie)
+  // Espace = play/pause (hors champs de saisie)
   document.addEventListener('keydown', (e) => {
     if (e.code !== 'Space' || e.target.closest('input, textarea, select, [contenteditable]')) return;
     e.preventDefault();
@@ -200,39 +281,64 @@ export function renderPlayer(root) {
     navigator.mediaSession.setActionHandler('previoustrack', prev);
     navigator.mediaSession.setActionHandler('nexttrack', () => next(false));
   }
-
-  updateBar();
 }
 
-function ctrl(name, iconName, label, onclick) {
+function ctrl(name, iconName, label, onclick, size = 18) {
   return h('button', {
     class: 'btn-icon player-ctrl', 'data-ctrl': name, 'aria-label': label, title: label,
-    onclick, html: icon(iconName, 18),
+    onclick, html: icon(iconName, size),
   });
 }
 
+// ------------------------------------------------------------------ Mises à jour
 function updateBar() {
+  updateNowPlaying();
   if (!els) return;
   const s = player.song;
-  els.title.textContent = s ? s.title : '—';
-  els.artist.textContent = s?.artist ?? '';
-  els.saved.style.display = s?.in_library ? '' : 'none';
-  els.cover.innerHTML = '';
-  els.cover.append(cover(s?.cover_url ?? null, 56, 24));
-  els.play.innerHTML = icon(isPlaying() ? 'pause' : 'play', 20);
-  els.shuffle.classList.toggle('active', player.shuffle);
-  els.repeat.classList.toggle('active', player.repeat !== 'off');
-  els.repeat.innerHTML = icon(player.repeat === 'one' ? 'repeat-1' : 'repeat', 18);
-  updateVolumeUI();
+  const playIcon = icon(isPlaying() ? 'pause' : 'play', els.kind === 'mini' ? 22 : 20);
+  if (els.title) els.title.textContent = s ? s.title : '—';
+  if (els.artist) els.artist.textContent = s?.artist ?? '';
+  if (els.cover) { els.cover.innerHTML = ''; els.cover.append(cover(s?.cover_url ?? null, els.kind === 'mini' ? 44 : 56, 22)); }
+  if (els.play) els.play.innerHTML = playIcon;
+  if (els.saved) els.saved.style.display = s?.in_library ? '' : 'none';
+  if (els.shuffle) els.shuffle.classList.toggle('active', player.shuffle);
+  if (els.repeat) {
+    els.repeat.classList.toggle('active', player.repeat !== 'off');
+    els.repeat.innerHTML = icon(player.repeat === 'one' ? 'repeat-1' : 'repeat', 18);
+  }
+  if (els.volume) updateVolumeUI();
+}
+
+function updateNowPlaying() {
+  if (!npEls) return;
+  const s = player.song;
+  npEls.title.textContent = s ? s.title : '—';
+  npEls.artist.textContent = s?.artist ?? '';
+  npEls.cover.innerHTML = '';
+  npEls.cover.append(cover(s?.cover_url ?? null, 0, 96));
+  npEls.play.innerHTML = icon(isPlaying() ? 'pause' : 'play', 30);
+  npEls.shuffle.classList.toggle('active', player.shuffle);
+  npEls.repeat.classList.toggle('active', player.repeat !== 'off');
+  npEls.repeat.innerHTML = icon(player.repeat === 'one' ? 'repeat-1' : 'repeat', 24);
 }
 
 function updateProgress() {
   if (!els) return;
   const a = audio();
   const dur = Number.isFinite(a.duration) ? a.duration : (player.song?.duration_seconds ?? 0);
-  els.time.textContent = fmtTime(a.currentTime);
-  els.duration.textContent = fmtTime(dur);
-  els.progressFill.style.width = dur ? `${(a.currentTime / dur) * 100}%` : '0%';
+  const pct = dur ? `${(a.currentTime / dur) * 100}%` : '0%';
+  if (els.progressFill) els.progressFill.style.width = pct;
+  if (els.time) els.time.textContent = fmtTime(a.currentTime);
+  if (els.duration) els.duration.textContent = fmtTime(dur);
+}
+
+function updateNpProgress() {
+  if (!npEls) return;
+  const a = audio();
+  const dur = Number.isFinite(a.duration) ? a.duration : (player.song?.duration_seconds ?? 0);
+  npEls.progressFill.style.width = dur ? `${(a.currentTime / dur) * 100}%` : '0%';
+  npEls.time.textContent = fmtTime(a.currentTime);
+  npEls.duration.textContent = fmtTime(dur);
 }
 
 function updateVolumeUI() {
@@ -241,37 +347,41 @@ function updateVolumeUI() {
   els.mute.innerHTML = icon(a.muted || a.volume === 0 ? 'volume-x' : a.volume < 0.5 ? 'volume-1' : 'volume-2', 18);
 }
 
-// ---- interactions barre de progression / volume (clic + glissement) ----
+// ---- interactions barre de progression / volume (pointeur : souris + tactile) ----
 function ratioFromEvent(e, el) {
   const r = el.getBoundingClientRect();
   return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
 }
 
-function onSeek(e) {
+function seekTo(e, el) {
   const a = audio();
   const dur = Number.isFinite(a.duration) ? a.duration : (player.song?.duration_seconds ?? 0);
-  if (dur) a.currentTime = ratioFromEvent(e, els.progress) * dur;
+  if (dur) a.currentTime = ratioFromEvent(e, el) * dur;
 }
 
-function dragSeek(e) { dragSlider(e, onSeek); }
-
-function onVolume(e) {
-  const a = audio();
-  a.muted = false;
-  a.volume = ratioFromEvent(e, els.volume);
-  localStorage.setItem('melovo.volume', String(a.volume));
-  updateVolumeUI();
+function seekPointer(e) {
+  const el = e.currentTarget;
+  dragPointer(e, (ev) => seekTo(ev, el));
 }
 
-function dragVolume(e) { dragSlider(e, onVolume); }
+function volumePointer(e) {
+  const el = e.currentTarget;
+  dragPointer(e, (ev) => {
+    const a = audio();
+    a.muted = false;
+    a.volume = ratioFromEvent(ev, el);
+    localStorage.setItem('melovo.volume', String(a.volume));
+    updateVolumeUI();
+  });
+}
 
-function dragSlider(e, apply) {
+function dragPointer(e, apply) {
   e.preventDefault();
   apply(e);
   const move = (ev) => apply(ev);
-  const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-  window.addEventListener('mousemove', move);
-  window.addEventListener('mouseup', up);
+  const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
 }
 
 function toggleMute() {

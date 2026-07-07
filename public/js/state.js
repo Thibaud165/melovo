@@ -14,6 +14,17 @@ export async function refreshPlaylists() {
   return playlists;
 }
 
+/** Vrai sur un écran de téléphone (bascule vers le shell mobile). */
+export function isMobile() {
+  return window.innerWidth <= 768;
+}
+
+/** Enregistre une lecture (son ou playlist) pour l'historique. Best-effort. */
+export function recordPlay(kind, id) {
+  if (!id) return;
+  api.post('/api/history', { kind, id }).catch(() => {});
+}
+
 // ---- Thème : la base espresso est figée, seul --accent est personnalisable. ----
 
 function hexToHsl(hex) {

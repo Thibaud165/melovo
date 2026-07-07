@@ -1,7 +1,7 @@
 // Shell de l'application : boot, écran de connexion, changement de mot de passe
 // forcé, layout (sidebar + topbar + lecteur) et routeur par hash.
 import { api } from './api.js';
-import { state, refreshPlaylists, applyAccent, applyTheme } from './state.js';
+import { state, refreshPlaylists, applyAccent, applyTheme, isMobile } from './state.js';
 import { h, toast, openMenu, avatar, cover } from './ui.js';
 import { icon } from './icons.js';
 import { renderPlayer } from './player.js';
@@ -9,6 +9,7 @@ import { homeView } from './views/home.js';
 import { searchView } from './views/search.js';
 import { importView } from './views/import.js';
 import { libraryView } from './views/library.js';
+import { playlistsView } from './views/playlists.js';
 import { playlistView, openEditPlaylist } from './views/playlist.js';
 import { settingsView } from './views/settings.js';
 import { adminView } from './views/admin.js';
@@ -35,6 +36,7 @@ function onLoggedIn(user) {
 
 async function startApp() {
   await refreshPlaylists().catch(() => {});
+  currentIsMobile = isMobile();
   renderShell();
   // Si le hash change ici, l'événement hashchange déclenchera route() tout seul.
   if (!location.hash || location.hash === '#/') location.hash = '#/home';
@@ -122,6 +124,20 @@ function renderChangePassword() {
 // ------------------------------------------------------------------ Shell
 function renderShell() {
   app.innerHTML = '';
+  if (isMobile()) renderMobileShell();
+  else renderDesktopShell();
+
+  renderPlayer(document.getElementById('player-root'));
+  renderSidebarPlaylists();
+  // Pas de doublons si on se reconnecte / re-render dans la même session.
+  document.removeEventListener('melovo:playlists', renderSidebarPlaylists);
+  document.addEventListener('melovo:playlists', renderSidebarPlaylists);
+  window.removeEventListener('hashchange', route);
+  window.addEventListener('hashchange', route);
+}
+
+// Desktop : sidebar + topbar + barre de lecture pleine largeur.
+function renderDesktopShell() {
   app.append(
     h('div', { class: 'layout' },
       h('aside', { class: 'sidebar' },
@@ -144,15 +160,49 @@ function renderShell() {
             avatar(state.me.username, 32))),
         h('main', { class: 'main', id: 'main' }))),
     h('footer', { class: 'player-bar', id: 'player-root' }));
-
-  renderPlayer(document.getElementById('player-root'));
-  renderSidebarPlaylists();
-  // Pas de doublons si on se reconnecte dans la même session.
-  document.removeEventListener('melovo:playlists', renderSidebarPlaylists);
-  document.addEventListener('melovo:playlists', renderSidebarPlaylists);
-  window.removeEventListener('hashchange', route);
-  window.addEventListener('hashchange', route);
 }
+
+// Onglets du bas (mobile) : Accueil · Recherche · Bibliothèque · Importer.
+const MOBILE_TABS = [
+  { hash: '#/home', icon: 'home', label: 'Accueil' },
+  { hash: '#/search', icon: 'search', label: 'Recherche' },
+  { hash: '#/playlists', icon: 'library', label: 'Bibliothèque' },
+  { hash: '#/import', icon: 'upload', label: 'Importer' },
+];
+
+// Mobile : topbar (retour + avatar), contenu scrollable, mini-lecteur, onglets.
+function renderMobileShell() {
+  app.append(
+    h('header', { class: 'mobile-topbar', id: 'mobile-topbar' },
+      h('button', { class: 'btn-icon topbar-back', 'aria-label': 'Retour',
+        onclick: () => history.back(), html: icon('arrow-left', 22) }),
+      h('span', { class: 'topbar-brand' }, h('span', { class: 'logo-dot' }), 'Melovo'),
+      h('button', { class: 'avatar-btn', 'aria-label': 'Menu du compte',
+        onclick: (e) => { e.stopPropagation(); accountMenu(e.currentTarget); } },
+        avatar(state.me.username, 32))),
+    h('main', { class: 'main main-mobile', id: 'main' }),
+    // sidebar-playlists cachée : conservée pour renderSidebarPlaylists (no-op visuel)
+    h('div', { id: 'sidebar-playlists', hidden: true }),
+    h('footer', { class: 'miniplayer-wrap', id: 'player-root' }),
+    h('nav', { class: 'tabbar', id: 'tabbar' },
+      MOBILE_TABS.map((t) => h('a', { class: 'tab', href: t.hash, 'data-tab': t.hash },
+        h('span', { class: 'tab-icon', html: icon(t.icon, 22) }),
+        h('span', { class: 'tab-label' }, t.label)))));
+}
+
+// Bascule desktop <-> mobile au redimensionnement / rotation.
+let currentIsMobile = null;
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (!state.me || state.me.must_change_password) return;
+    if (isMobile() === currentIsMobile) return;
+    currentIsMobile = isMobile();
+    renderShell();
+    route();
+  }, 150);
+});
 
 function navLink(href, iconName, label) {
   return h('a', { class: 'nav-item', href, 'data-route': href },
@@ -193,11 +243,19 @@ const routes = [
   [/^#\/home$/, () => homeView],
   [/^#\/search$/, () => searchView],
   [/^#\/import$/, () => importView],
+  [/^#\/playlists$/, () => playlistsView],
   [/^#\/library$/, () => libraryView],
   [/^#\/playlist\/(\d+)$/, () => playlistView],
   [/^#\/settings$/, () => settingsView],
   [/^#\/admin$/, () => adminView],
 ];
+
+// Onglet mobile mis en évidence selon la route (les pages de détail
+// restent sous l'onglet « Bibliothèque »).
+function activeTabFor(hash) {
+  if (hash === '#/library' || hash.startsWith('#/playlist/')) return '#/playlists';
+  return hash;
+}
 
 async function route() {
   const main = document.getElementById('main');
@@ -206,9 +264,19 @@ async function route() {
 
   if (hash === '#/admin' && !state.me.is_admin) { location.hash = '#/home'; return; }
 
-  // état actif dans la sidebar
+  // état actif dans la sidebar (desktop)
   document.querySelectorAll('.nav-item').forEach((a) =>
     a.classList.toggle('active', a.dataset.route === hash));
+
+  // état actif dans les onglets + bouton retour (mobile)
+  const activeTab = activeTabFor(hash);
+  document.querySelectorAll('.tab').forEach((a) =>
+    a.classList.toggle('active', a.dataset.tab === activeTab));
+  const topbar = document.getElementById('mobile-topbar');
+  if (topbar) {
+    const isRoot = MOBILE_TABS.some((t) => t.hash === hash);
+    topbar.classList.toggle('show-back', !isRoot);
+  }
 
   // Chaque vue est montée dans un conteneur NEUF : à la navigation suivante,
   // l'ancien conteneur quitte le DOM et ses écouteurs auto-nettoyés se retirent

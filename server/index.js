@@ -47,6 +47,7 @@ app.use('/api/admin', (await import('./routes/admin.js')).default);
 app.use('/api/songs', (await import('./routes/songs.js')).default);
 app.use('/api/import', (await import('./routes/imports.js')).default);
 app.use('/api/playlists', (await import('./routes/playlists.js')).default);
+app.use('/api/history', (await import('./routes/history.js')).default);
 app.use('/api', (await import('./routes/search.js')).default);
 
 // Pochettes servies statiquement, derrière l'authentification.
@@ -54,9 +55,13 @@ app.use('/media/covers', requireAuth, express.static(path.join(DATA_DIR, 'covers
 app.use('/media/playlist-covers', requireAuth, express.static(path.join(DATA_DIR, 'playlist-covers'), { maxAge: '7d', immutable: true }));
 
 // --- SPA ---------------------------------------------------------------
-app.use(express.static(PUBLIC_DIR, { maxAge: '1h' }));
+// Assets non versionnés (pas de build) : revalidation par ETag plutôt que
+// cache long, sinon un déploiement ne s'applique qu'après vidage du cache.
+// Sur réseau local / Tailscale, le coût de revalidation est négligeable.
+app.use(express.static(PUBLIC_DIR, { etag: true, maxAge: 0, lastModified: true }));
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/') || req.path.startsWith('/media/')) return next();
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 

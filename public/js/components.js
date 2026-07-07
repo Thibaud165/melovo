@@ -1,7 +1,7 @@
 // Composants partagés : table des pistes, menus de piste, modales
 // (édition de titre, ajout à une playlist), sélecteurs de pochette et de couleur.
 import { api } from './api.js';
-import { state } from './state.js';
+import { state, isMobile } from './state.js';
 import { h, fmtTime, fmtDate, toast, modal, confirmDialog, openMenu, avatar, cover, emptyState } from './ui.js';
 import { icon } from './icons.js';
 import * as player from './player.js';
@@ -164,6 +164,8 @@ export function trackTable(items, opts = {}) {
       'data-track-id': it.track_id ?? '',
       'data-song-id': song.id,
       ondblclick: () => player.playContext(songs, i),
+      // Mobile : un simple appui sur la ligne (hors bouton) lance la lecture.
+      onclick: (e) => { if (isMobile() && !e.target.closest('button')) player.playContext(songs, i); },
     },
       num,
       h('span', { class: 'col-title' },

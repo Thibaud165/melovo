@@ -72,11 +72,21 @@ db.exec(`
     expires INTEGER NOT NULL
   );
 
+  -- Historique d'écoute (accueil mobile : sons/playlists récents).
+  CREATE TABLE IF NOT EXISTS play_events (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind      TEXT NOT NULL CHECK (kind IN ('song','playlist')),
+    ref_id    INTEGER NOT NULL,
+    played_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_songs_owner        ON songs(owner_id);
   CREATE INDEX IF NOT EXISTS idx_tracks_playlist    ON playlist_tracks(playlist_id, position);
   CREATE INDEX IF NOT EXISTS idx_tracks_song        ON playlist_tracks(song_id);
   CREATE INDEX IF NOT EXISTS idx_shares_user        ON playlist_shares(user_id);
   CREATE INDEX IF NOT EXISTS idx_sessions_expires   ON sessions(expires);
+  CREATE INDEX IF NOT EXISTS idx_play_user          ON play_events(user_id, kind, played_at);
 `);
 
 // Migrations légères : colonnes ajoutées après la v1 (base existante -> ALTER).

@@ -1,6 +1,6 @@
 // Vue playlist : en-tête coloré, pistes, drag & drop, partage, édition.
 import { api } from '../api.js';
-import { state, refreshPlaylists } from '../state.js';
+import { state, refreshPlaylists, recordPlay } from '../state.js';
 import { h, fmtTotal, toast, modal, confirmDialog, openMenu, emptyState, avatar } from '../ui.js';
 import { icon } from '../icons.js';
 import { trackTable, collectionHeader, coverPicker, colorPicker } from '../components.js';
@@ -33,9 +33,9 @@ export async function playlistView(root, id) {
   document.addEventListener('melovo:playlist-changed', onExternalChange);
 
   const play = h('button', { class: 'play-hero', 'aria-label': 'Lire', html: icon('play', 24),
-    onclick: () => player.playContext(songs, 0) });
+    onclick: () => { player.playContext(songs, 0); recordPlay('playlist', playlist.id); } });
   const shuffleBtn = h('button', { class: 'btn-icon action-lg', title: 'Lecture aléatoire', html: icon('shuffle', 22),
-    onclick: () => player.playContext(songs, Math.floor(Math.random() * songs.length), { shuffle: true }) });
+    onclick: () => { player.playContext(songs, Math.floor(Math.random() * songs.length), { shuffle: true }); recordPlay('playlist', playlist.id); } });
   if (!songs.length) { play.disabled = true; shuffleBtn.disabled = true; }
 
   const menuBtn = h('button', { class: 'btn-icon action-lg', title: 'Options', html: icon('more-horizontal', 22),
