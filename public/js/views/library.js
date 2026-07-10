@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { state } from '../state.js';
 import { h, fmtTotal, emptyState, toast } from '../ui.js';
 import { icon } from '../icons.js';
-import { trackTable, collectionHeader } from '../components.js';
+import { trackTable, trackSearchInput, collectionHeader } from '../components.js';
 import * as player from '../player.js';
 
 export async function libraryView(root) {
@@ -38,7 +38,7 @@ export async function libraryView(root) {
     return;
   }
 
-  root.append(trackTable(items, {
+  const table = trackTable(items, {
     canReorder: true,          // glisser-déposer pour ranger sa bibliothèque
     reorderMode: 'song',       // on réordonne par song.id (pas de track_id ici)
     onChanged: async () => { root.innerHTML = ''; await libraryView(root); },
@@ -47,5 +47,7 @@ export async function libraryView(root) {
       try { await api.put('/api/songs/library/order', { song_ids: songIds }); }
       catch (ex) { toast(ex.message, 'error'); root.innerHTML = ''; await libraryView(root); }
     },
-  }));
+  });
+  if (songs.length > 4) root.append(trackSearchInput(table, 'Rechercher dans ma bibliothèque…'));
+  root.append(table);
 }

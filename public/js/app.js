@@ -4,7 +4,7 @@ import { api } from './api.js';
 import { state, refreshPlaylists, applyAccent, applyTheme, isMobile } from './state.js';
 import { h, toast, openMenu, avatar, cover } from './ui.js';
 import { icon } from './icons.js';
-import { renderPlayer } from './player.js';
+import { renderPlayer, restorePlayback } from './player.js';
 import { homeView } from './views/home.js';
 import { searchView } from './views/search.js';
 import { importView } from './views/import.js';
@@ -38,6 +38,7 @@ async function startApp() {
   await refreshPlaylists().catch(() => {});
   currentIsMobile = isMobile();
   renderShell();
+  restorePlayback(); // reprend la dernière lecture (en pause) après un reload
   // Si le hash change ici, l'événement hashchange déclenchera route() tout seul.
   if (!location.hash || location.hash === '#/') location.hash = '#/home';
   else route();

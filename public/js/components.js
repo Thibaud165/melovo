@@ -247,6 +247,30 @@ export function trackTable(items, opts = {}) {
   }
 }
 
+// ---------------------------------------------------------------- Recherche de pistes
+/**
+ * Barre de recherche qui filtre en direct les lignes d'une `trackTable` déjà
+ * rendue (par titre ou artiste). À placer au-dessus de la table.
+ */
+export function trackSearchInput(tableEl, placeholder = 'Rechercher un titre, un artiste…') {
+  const input = h('input', { class: 'input', type: 'search', placeholder, 'aria-label': 'Rechercher' });
+  const empty = h('p', { class: 'track-search-empty', hidden: true }, 'Aucun titre ne correspond.');
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    let shown = 0;
+    tableEl.querySelectorAll('.track-list .track-row').forEach((row) => {
+      const t = (row.querySelector('.track-title')?.textContent || '').toLowerCase();
+      const a = (row.querySelector('.track-artist')?.textContent || '').toLowerCase();
+      const match = !q || t.includes(q) || a.includes(q);
+      row.style.display = match ? '' : 'none';
+      if (match) shown += 1;
+    });
+    empty.hidden = shown > 0;
+  });
+  return h('div', { class: 'track-search' },
+    h('span', { class: 'search-icon', html: icon('search', 18) }), input, empty);
+}
+
 // ---------------------------------------------------------------- En-tête de collection
 /**
  * En-tête coloré commun à la bibliothèque et aux playlists :

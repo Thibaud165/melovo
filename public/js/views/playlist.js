@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { state, refreshPlaylists, recordPlay } from '../state.js';
 import { h, fmtTotal, toast, modal, confirmDialog, openMenu, emptyState, avatar } from '../ui.js';
 import { icon } from '../icons.js';
-import { trackTable, collectionHeader, coverPicker, colorPicker } from '../components.js';
+import { trackTable, trackSearchInput, collectionHeader, coverPicker, colorPicker } from '../components.js';
 import * as player from '../player.js';
 
 export async function playlistView(root, id) {
@@ -79,7 +79,7 @@ export async function playlistView(root, id) {
     return;
   }
 
-  root.append(trackTable(tracks, {
+  const table = trackTable(tracks, {
     canReorder: canEdit,
     canRemove: canEdit,
     onChanged: rerender,
@@ -94,7 +94,10 @@ export async function playlistView(root, id) {
       try { await api.put(`/api/playlists/${playlist.id}/order`, { track_ids: trackIds }); }
       catch (ex) { toast(ex.message, 'error'); rerender(); }
     },
-  }));
+  });
+  // Recherche dans la playlist dès qu'il y a assez de titres.
+  if (tracks.length > 4) root.append(trackSearchInput(table, 'Rechercher dans la playlist…'));
+  root.append(table);
 }
 
 // ---------------------------------------------------------------- Modales

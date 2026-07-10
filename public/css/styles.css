@@ -396,6 +396,23 @@ img { display: block; }
 .card-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-sub { font-size: 13px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Cartes compactes (ex. « Écoutés récemment ») : plus petites, texte réduit. */
+.card-grid-sm { grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 12px; }
+.card-grid-sm .card { padding: 8px; gap: 2px; }
+.card-grid-sm .card-play { width: 32px; height: 32px; right: 6px; bottom: 6px; }
+.card-grid-sm .card-name { font-size: 13px; }
+.card-grid-sm .card-sub { font-size: 12px; }
+
+/* ---------- Recherche dans une liste de pistes ---------- */
+.track-search {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+  padding: 0 12px; max-width: 420px; margin: 4px 0 8px; position: relative;
+}
+.track-search .input { border: none; background: none; padding: 9px 0; }
+.track-search .input:focus { box-shadow: none; }
+.track-search-empty { position: absolute; top: 100%; left: 0; margin-top: 8px; color: var(--text-muted); font-size: 13px; }
+
 /* ---------- Boutons ---------- */
 .btn {
   display: inline-flex;
@@ -1033,6 +1050,8 @@ img { display: block; }
   .quick-tile-play, .card-play { opacity: 1; }
   .lib-grid { grid-template-columns: repeat(2, 1fr); }
   .card-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .card-grid-sm { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .track-search { max-width: none; }
 
   /* En-tête de collection empilé (pochette au-dessus, texte dessous). */
   .collection-head {

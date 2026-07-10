@@ -40,68 +40,107 @@ export function startJob(url, userId, onDone) {
   };
   jobs.set(id, job);
 
+  // YouTube renvoie régulièrement des erreurs transitoires (throttling de
+  // l'extraction, 403 sur un fragment…) qui passent au 2ᵉ essai. On retente
+  // donc automatiquement ; on n'échoue tout de suite que sur une erreur
+  // permanente (vidéo indispo, privée, lien invalide…).
+  const MAX_ATTEMPTS = 3;
   (async () => {
-    await fs.mkdir(workDir, { recursive: true });
-    // Équivalent de : yt-dlp -x --audio-format mp3 --embed-thumbnail --embed-metadata
-    // + --write-thumbnail pour disposer d'un fichier image exploitable par sharp.
-    const args = [
-      '--no-playlist',
-      '-x', '--audio-format', 'mp3',
-      '--audio-quality', '0',
-      '--embed-thumbnail', '--embed-metadata',
-      '--write-thumbnail',
-      '--newline', '--progress',
-      '--no-mtime',
-      '-o', path.join(workDir, 'audio.%(ext)s'),
-      url,
-    ];
-    const proc = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderrTail = '';
+    let lastStderr = '';
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
+      await fs.mkdir(workDir, { recursive: true });
+      job.status = 'downloading';
+      job.progress = 0;
 
-    proc.stdout.on('data', (chunk) => {
-      // Lignes de progression du type : "[download]  42.3% of 3.52MiB at ..."
-      for (const line of chunk.toString().split('\n')) {
-        const m = line.match(/\[download\]\s+([\d.]+)%/);
-        if (m) job.progress = Math.min(99, Number(m[1]));
-        if (line.includes('[ExtractAudio]')) { job.status = 'processing'; job.progress = 99; }
-      }
-    });
-    proc.stderr.on('data', (chunk) => {
-      stderrTail = (stderrTail + chunk.toString()).slice(-4000);
-    });
+      const { code, stderr } = await runYtDlp(job, workDir, url);
+      lastStderr = stderr;
 
-    proc.on('error', () => finishError(job, workDir, 'yt-dlp est introuvable sur le serveur.'));
-    proc.on('close', async (code) => {
-      if (code !== 0) {
-        return finishError(job, workDir, humanYtError(stderrTail));
-      }
-      try {
-        job.status = 'processing';
-        const files = await fs.readdir(workDir);
-        const audio = files.find((f) => f.endsWith('.mp3'));
-        if (!audio) throw new Error('Aucun fichier MP3 produit par yt-dlp.');
-        const thumb = files.find((f) => /\.(jpg|jpeg|png|webp)$/i.test(f)) ?? null;
-        await onDone(job, {
-          audioPath: path.join(workDir, audio),
-          thumbPath: thumb ? path.join(workDir, thumb) : null,
-        });
-        job.status = 'done';
-        job.progress = 100;
-      } catch (err) {
-        console.error('[yt-dlp] post-traitement échoué :', err);
-        job.status = 'error';
-        job.error = 'Le traitement du fichier téléchargé a échoué.';
-      } finally {
+      if (code === 0) {
+        // Succès : post-traitement (création du son en DB via onDone).
+        try {
+          job.status = 'processing';
+          const files = await fs.readdir(workDir);
+          const audio = files.find((f) => f.endsWith('.mp3'));
+          if (!audio) throw new Error('Aucun fichier MP3 produit par yt-dlp.');
+          const thumb = files.find((f) => /\.(jpg|jpeg|png|webp)$/i.test(f)) ?? null;
+          await onDone(job, {
+            audioPath: path.join(workDir, audio),
+            thumbPath: thumb ? path.join(workDir, thumb) : null,
+          });
+          job.status = 'done';
+          job.progress = 100;
+        } catch (err) {
+          console.error('[yt-dlp] post-traitement échoué :', err);
+          job.status = 'error';
+          job.error = 'Le traitement du fichier téléchargé a échoué.';
+        }
         await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
         scheduleCleanup(id);
+        return;
       }
-    });
+
+      // Échec : on abandonne si c'est permanent ou si c'était le dernier essai.
+      if (isPermanentError(stderr) || attempt === MAX_ATTEMPTS) {
+        return finishError(job, workDir, humanYtError(lastStderr));
+      }
+      console.warn(`[yt-dlp] essai ${attempt}/${MAX_ATTEMPTS} échoué (transitoire), nouvelle tentative…`);
+      job.status = 'downloading';
+      await sleep(1200 * attempt);
+    }
   })().catch(async (err) => {
     console.error('[yt-dlp] lancement échoué :', err);
     finishError(job, workDir, 'Impossible de lancer le téléchargement.');
   });
 
   return job;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Lance une fois yt-dlp ; met à jour la progression ; résout {code, stderr}. */
+function runYtDlp(job, workDir, url) {
+  // --retries / --extractor-retries : yt-dlp retente lui-même en interne.
+  const args = [
+    '--no-playlist',
+    '-x', '--audio-format', 'mp3',
+    '--audio-quality', '0',
+    '--embed-thumbnail', '--embed-metadata',
+    '--write-thumbnail',
+    '--newline', '--progress', '--no-warnings',
+    '--no-mtime',
+    '--retries', '5', '--fragment-retries', '10', '--extractor-retries', '3',
+    '-o', path.join(workDir, 'audio.%(ext)s'),
+    url,
+  ];
+  return new Promise((resolve) => {
+    const proc = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderrTail = '';
+    proc.stdout.on('data', (chunk) => {
+      for (const line of chunk.toString().split('\n')) {
+        const m = line.match(/\[download\]\s+([\d.]+)%/);
+        if (m) job.progress = Math.min(99, Number(m[1]));
+        if (line.includes('[ExtractAudio]')) { job.status = 'processing'; job.progress = 99; }
+      }
+    });
+    proc.stderr.on('data', (chunk) => { stderrTail = (stderrTail + chunk.toString()).slice(-4000); });
+    proc.on('error', () => resolve({ code: -1, stderr: 'spawn-error' }));
+    proc.on('close', (code) => resolve({ code, stderr: stderrTail }));
+  });
+}
+
+/** Erreurs pour lesquelles réessayer ne sert à rien (échec immédiat). */
+function isPermanentError(stderr) {
+  const s = stderr.toLowerCase();
+  return s.includes('video unavailable')
+    || s.includes('this video is not available')
+    || s.includes('private video')
+    || s.includes('members-only')
+    || s.includes('removed by the uploader')
+    || s.includes('unsupported url')
+    || s.includes('is not a valid url')
+    || s.includes('requested format is not available')
+    || (s.includes('sign in') && s.includes('age'));
 }
 
 async function finishError(job, workDir, message) {
@@ -127,5 +166,6 @@ function humanYtError(stderr) {
   if (s.includes('name resolution') || s.includes('network') || s.includes('timed out')) {
     return 'Téléchargement impossible : pas d’accès à Internet depuis le serveur.';
   }
-  return 'Le téléchargement a échoué (yt-dlp). Vérifiez le lien ou mettez à jour yt-dlp.';
+  // Après plusieurs tentatives : probablement un souci temporaire côté YouTube.
+  return 'Le téléchargement a échoué après plusieurs tentatives. Réessayez dans un instant.';
 }

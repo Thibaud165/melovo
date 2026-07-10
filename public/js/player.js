@@ -20,6 +20,14 @@ let els = null;     // références DOM de la surface active (barre ou mini-lect
 let npEls = null;   // références du plein écran « Lecture en cours » (si ouvert)
 let wired = false;  // câblage audio/clavier/mediaSession fait une seule fois
 
+// Volume : le curseur représente une position linéaire (0→1), mais le volume
+// réel suit une courbe exponentielle (l'oreille est logarithmique) : ça monte
+// doucement en bas et de plus en plus fort vers le haut.
+const VOL_EXP = 2.5;
+let volumePos = clamp01(Number(localStorage.getItem('melovo.volume') ?? 1));
+function clamp01(v) { return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1; }
+function applyVolume() { audio().volume = Math.pow(volumePos, VOL_EXP); }
+
 export function currentSongId() { return player.song?.id ?? null; }
 export function isPlaying() { return player.song && !audio().paused; }
 
@@ -49,17 +57,18 @@ function buildQueue(keepId) {
   }
 }
 
-function loadCurrent(autoplay) {
+function loadCurrent(autoplay, { record = true } = {}) {
   const song = player.queue[player.index];
   if (!song) return;
   player.song = song;
   const a = audio();
   a.src = song.audio_url;
   if (autoplay) a.play().catch(() => {});
-  recordPlay('song', song.id);
+  if (record) recordPlay('song', song.id);
   updateBar();
   updateMediaSession(song);
   document.dispatchEvent(new CustomEvent('melovo:trackchange'));
+  savePlayback();
 }
 
 export function togglePlay() {
@@ -124,7 +133,9 @@ export function removeSong(songId) {
   if (wasCurrent) {
     audio().pause();
     if (player.queue.length) { player.index = Math.min(player.index, player.queue.length - 1); loadCurrent(true); }
-    else { player.song = null; player.index = -1; updateBar(); }
+    else { player.song = null; player.index = -1; updateBar(); savePlayback(); }
+  } else {
+    savePlayback();
   }
 }
 
@@ -211,7 +222,8 @@ function openNowPlaying() {
         onclick: closeNowPlaying }),
       h('span', { class: 'np-label' }, 'Lecture en cours'),
       h('span', { style: 'width:32px' })),
-    h('div', { class: 'np-cover' }),
+    // Un appui sur la pochette réduit le plein écran (comme la flèche « < »).
+    h('div', { class: 'np-cover', role: 'button', 'aria-label': 'Réduire', onclick: closeNowPlaying }),
     h('div', { class: 'np-meta' },
       h('div', { class: 'np-title' }),
       h('div', { class: 'np-artist' })),
@@ -258,11 +270,18 @@ function wireAudioOnce() {
   if (wired) return;
   wired = true;
   const a = audio();
-  a.volume = Number(localStorage.getItem('melovo.volume') ?? 1);
-  a.addEventListener('timeupdate', () => { updateProgress(); updateNpProgress(); });
+  applyVolume();
+  a.addEventListener('timeupdate', () => { updateProgress(); updateNpProgress(); savePlaybackThrottled(); });
   a.addEventListener('durationchange', () => { updateProgress(); updateNpProgress(); });
-  // play/pause : rafraîchit la surface ET notifie les lignes (surlignage + égaliseur).
-  const onPlayState = () => { updateBar(); document.dispatchEvent(new CustomEvent('melovo:trackchange')); };
+  // play/pause : rafraîchit la surface, notifie les lignes, mémorise la position.
+  const onPlayState = () => {
+    updateBar();
+    document.dispatchEvent(new CustomEvent('melovo:trackchange'));
+    savePlayback();
+  };
+  // Sauvegarde finale avant fermeture de l'onglet.
+  window.addEventListener('pagehide', savePlayback);
+  window.addEventListener('beforeunload', savePlayback);
   a.addEventListener('play', onPlayState);
   a.addEventListener('pause', onPlayState);
   a.addEventListener('ended', () => next(true));
@@ -343,8 +362,9 @@ function updateNpProgress() {
 
 function updateVolumeUI() {
   const a = audio();
-  els.volumeFill.style.width = `${(a.muted ? 0 : a.volume) * 100}%`;
-  els.mute.innerHTML = icon(a.muted || a.volume === 0 ? 'volume-x' : a.volume < 0.5 ? 'volume-1' : 'volume-2', 18);
+  // Le remplissage suit la position linéaire du curseur (pas le volume réel).
+  els.volumeFill.style.width = `${(a.muted ? 0 : volumePos) * 100}%`;
+  els.mute.innerHTML = icon(a.muted || volumePos === 0 ? 'volume-x' : volumePos < 0.5 ? 'volume-1' : 'volume-2', 18);
 }
 
 // ---- interactions barre de progression / volume (pointeur : souris + tactile) ----
@@ -367,10 +387,10 @@ function seekPointer(e) {
 function volumePointer(e) {
   const el = e.currentTarget;
   dragPointer(e, (ev) => {
-    const a = audio();
-    a.muted = false;
-    a.volume = ratioFromEvent(ev, el);
-    localStorage.setItem('melovo.volume', String(a.volume));
+    audio().muted = false;
+    volumePos = ratioFromEvent(ev, el);        // position linéaire du curseur
+    applyVolume();                              // volume réel = position^2.5
+    localStorage.setItem('melovo.volume', String(volumePos));
     updateVolumeUI();
   });
 }
@@ -398,4 +418,55 @@ function updateMediaSession(song) {
     album: 'Melovo',
     artwork: song.cover_url ? [{ src: song.cover_url, sizes: '500x500', type: 'image/jpeg' }] : [],
   });
+}
+
+// ------------------------------------------------------------------ Persistance
+// On mémorise la file, la position dans le morceau et les modes pour reprendre
+// la lecture là où on en était après un rechargement de page.
+const SAVE_KEY = 'melovo.playback';
+let saveTimer = 0;
+
+function savePlayback() {
+  if (!player.song) { localStorage.removeItem(SAVE_KEY); return; }
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      context: player.context,
+      queueIds: player.queue.map((s) => s.id),
+      index: player.index,
+      shuffle: player.shuffle,
+      repeat: player.repeat,
+      songId: player.song.id,
+      time: audio().currentTime || 0,
+    }));
+  } catch { /* quota / mode privé : on ignore */ }
+}
+
+// Sauvegarde limitée (au fil de la lecture) pour ne pas écrire à chaque tick.
+function savePlaybackThrottled() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => { saveTimer = 0; savePlayback(); }, 4000);
+}
+
+/** Restaure la dernière session de lecture (sans relancer automatiquement). */
+export function restorePlayback() {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { saved = null; }
+  if (!saved?.context?.length || !saved.queueIds?.length) return;
+
+  player.context = saved.context;
+  player.shuffle = !!saved.shuffle;
+  player.repeat = saved.repeat ?? 'off';
+  const byId = new Map(saved.context.map((s) => [s.id, s]));
+  player.queue = saved.queueIds.map((id) => byId.get(id)).filter(Boolean);
+  if (!player.queue.length) return;
+  player.index = Math.min(Math.max(0, saved.index ?? 0), player.queue.length - 1);
+  player.song = player.queue[player.index];
+
+  const a = audio();
+  a.src = player.song.audio_url;
+  const seek = () => { if (saved.time) { try { a.currentTime = saved.time; } catch { /* ignore */ } } };
+  a.addEventListener('loadedmetadata', seek, { once: true });
+  updateBar();
+  updateMediaSession(player.song);
+  document.dispatchEvent(new CustomEvent('melovo:trackchange'));
 }

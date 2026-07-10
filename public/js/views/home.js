@@ -30,7 +30,8 @@ export async function homeView(root) {
   const cards = recentSongs.length ? recentSongs : librarySongs.slice(0, 12);
   root.append(h('h2', { class: 'section-title' }, recentSongs.length ? 'Écoutés récemment' : 'Ajouts récents'));
   if (cards.length) {
-    root.append(h('div', { class: 'card-grid' },
+    // Cartes compactes (plus petites, façon tuiles).
+    root.append(h('div', { class: 'card-grid card-grid-sm' },
       cards.map((s, i) => songCard(s, () => player.playContext(cards, i)))));
   } else {
     root.append(emptyState('music', 'Votre bibliothèque est vide. Importez votre premier titre !',
