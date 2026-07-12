@@ -51,11 +51,13 @@ function searchImportPanel() {
 }
 
 function resultRow(r) {
-  const thumb = h('div', { class: 'yt-thumb' });
+  // Miniature cliquable : appui = aperçu audio (le son est diffusé par le Pi).
+  const overlay = h('span', { class: 'yt-thumb-play', html: icon('play', 20) });
+  const thumb = h('div', { class: 'yt-thumb', role: 'button', 'aria-label': 'Écouter un aperçu' });
   const img = h('img', { src: r.thumbnail, alt: '', loading: 'lazy' });
-  // Si la miniature ne charge pas (pas d'accès externe), repli sur une icône.
-  img.addEventListener('error', () => { thumb.classList.add('cover-empty'); thumb.innerHTML = icon('music-2', 20); });
-  thumb.append(img);
+  img.addEventListener('error', () => { thumb.classList.add('cover-empty'); img.remove(); });
+  thumb.append(img, overlay);
+  thumb.addEventListener('click', () => togglePreview(r.id, overlay));
 
   const importBtn = h('button', { class: 'btn btn-secondary btn-sm yt-import-btn' }, 'Importer');
   const sub = [r.artist, r.duration ? fmtTime(r.duration) : null].filter(Boolean).join(' · ');
@@ -86,6 +88,37 @@ function resultRow(r) {
   });
   return row;
 }
+
+// ---- Aperçu audio d'un résultat (lecteur séparé du lecteur principal) ----
+let previewAudio = null;
+let previewOverlay = null;
+
+function stopPreview() {
+  if (previewAudio) { previewAudio.pause(); previewAudio.removeAttribute('src'); previewAudio.load(); previewAudio = null; }
+  if (previewOverlay) {
+    previewOverlay.classList.remove('previewing', 'loading');
+    previewOverlay.innerHTML = icon('play', 20);
+    previewOverlay = null;
+  }
+}
+
+function togglePreview(id, overlay) {
+  if (previewOverlay === overlay) { stopPreview(); return; } // ré-appui = stop
+  stopPreview();
+  const a = new Audio(`/api/import/preview/${id}`);
+  previewAudio = a;
+  previewOverlay = overlay;
+  overlay.classList.add('previewing', 'loading');
+  overlay.innerHTML = icon('loader-2', 20);
+  const showPause = () => { overlay.classList.remove('loading'); overlay.innerHTML = icon('pause', 20); };
+  a.addEventListener('playing', showPause);
+  a.addEventListener('ended', stopPreview);
+  a.addEventListener('error', () => { toast('Aperçu indisponible.', 'error'); stopPreview(); });
+  a.play().then(showPause).catch(() => {});
+}
+
+// L'aperçu s'arrête si on quitte la page d'import.
+window.addEventListener('hashchange', stopPreview);
 
 // Suivi d'un job d'import (partagé par la recherche et l'import par lien).
 async function pollJob(jobId, onProgress, onDone, onError) {

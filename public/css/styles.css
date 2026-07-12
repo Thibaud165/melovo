@@ -762,10 +762,22 @@ img { display: block; }
 .yt-result:hover { background: var(--surface-hover); }
 .yt-result-done { opacity: 0.6; }
 .yt-thumb {
+  position: relative;
   width: 48px; height: 48px; border-radius: 4px; overflow: hidden; flex-shrink: 0;
   background: var(--bg); display: grid; place-items: center; color: var(--text-dim);
+  cursor: pointer;
 }
+.yt-thumb.cover-empty::after { content: ''; } /* garde le fond si pas d'image */
 .yt-thumb img { width: 100%; height: 100%; object-fit: cover; }
+/* Overlay de lecture d'aperçu (apparaît au survol, ou pendant l'aperçu). */
+.yt-thumb-play {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.45); color: #fff; opacity: 0; transition: opacity var(--t);
+}
+.yt-thumb:hover .yt-thumb-play,
+.yt-thumb-play.previewing { opacity: 1; }
+.yt-thumb-play.previewing { color: var(--accent); }
+.yt-thumb-play.loading { animation: spin 0.9s linear infinite; }
 .yt-result-meta { flex: 1; min-width: 0; }
 .yt-result-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .yt-result-sub { font-size: 13px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1067,7 +1079,7 @@ img { display: block; }
 
   /* Tuiles : 2 colonnes ; boutons « lire » toujours visibles (pas de survol tactile). */
   .quick-tiles { grid-template-columns: repeat(2, 1fr); }
-  .quick-tile-play, .card-play { opacity: 1; }
+  .quick-tile-play, .card-play, .yt-thumb-play { opacity: 1; }
   .lib-grid { grid-template-columns: repeat(2, 1fr); }
   .card-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .card-grid-sm { grid-template-columns: repeat(3, 1fr); gap: 8px; }

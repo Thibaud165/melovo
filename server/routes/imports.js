@@ -1,6 +1,7 @@
 // Import de musique : upload de fichier (MP3/MP4, en deux temps avec brouillon
 // éditable) et lien YouTube / YouTube Music (job yt-dlp avec progression).
 import { Router } from 'express';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import crypto from 'node:crypto';
@@ -15,6 +16,43 @@ import { serializeSong, SONG_SELECT } from '../lib/songs.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// Aperçu audio d'un résultat : le Pi diffuse le son en direct (yt-dlp -> ffmpeg
+// -> MP3 en streaming). Transcodé en MP3 pour être lisible partout (dont iOS),
+// et proxifié par le serveur pour marcher via Tailscale sans internet côté client.
+router.get('/preview/:id', (req, res) => {
+  const id = String(req.params.id);
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return res.status(400).end();
+  const url = `https://www.youtube.com/watch?v=${id}`;
+
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Cache-Control', 'no-store');
+
+  const yt = spawn('yt-dlp', [
+    '-f', 'bestaudio/best', '-o', '-', '--no-playlist', '--quiet', '--no-warnings', url,
+  ], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const ff = spawn('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error', '-i', 'pipe:0',
+    '-vn', '-codec:a', 'libmp3lame', '-q:a', '5', '-f', 'mp3', 'pipe:1',
+  ], { stdio: ['pipe', 'pipe', 'ignore'] });
+
+  yt.stdout.pipe(ff.stdin);
+  ff.stdout.pipe(res);
+
+  let killed = false;
+  const kill = () => {
+    if (killed) return; killed = true;
+    yt.kill('SIGKILL'); ff.kill('SIGKILL');
+    clearTimeout(guard);
+  };
+  // EPIPE quand un côté se ferme avant l'autre : on ignore.
+  ff.stdin.on('error', () => {});
+  yt.on('error', kill);
+  ff.on('error', kill);
+  res.on('close', kill);           // client parti / lecture stoppée
+  const guard = setTimeout(kill, 12 * 60_000); // sécurité anti-processus zombie
+  guard.unref?.();
+});
 
 // Recherche YouTube Music : renvoie une liste de titres à importer en un clic.
 router.get('/search', ah(async (req, res) => {
