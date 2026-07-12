@@ -1,14 +1,103 @@
-// Import : fichier MP3/MP4 (avec brouillon éditable) ou lien YouTube (progression).
+// Import : recherche YouTube Music (import en un clic), fichier MP3/MP4
+// (brouillon éditable), ou lien YouTube (progression).
 import { api } from '../api.js';
-import { h, toast, spinner } from '../ui.js';
+import { h, toast, spinner, fmtTime } from '../ui.js';
 import { icon } from '../icons.js';
 import { coverPicker } from '../components.js';
 
 export function importView(root) {
   root.append(h('h1', { class: 'page-title' }, 'Importer'));
+  root.append(searchImportPanel());
   const grid = h('div', { class: 'import-grid' });
   root.append(grid);
   grid.append(fileImportPanel(), youtubeImportPanel());
+}
+
+// ---------------------------------------------------------------- Recherche YouTube Music
+function searchImportPanel() {
+  const input = h('input', { class: 'input', type: 'search',
+    placeholder: 'Rechercher un titre, un artiste…', 'aria-label': 'Rechercher sur YouTube Music' });
+  const submit = h('button', { class: 'btn btn-primary', type: 'submit' }, 'Rechercher');
+  const form = h('form', { class: 'yt-form' }, input, submit);
+  const results = h('div', { class: 'yt-results' });
+
+  const panel = h('section', { class: 'import-panel import-search' },
+    h('h2', { class: 'section-title' }, 'Rechercher sur YouTube Music'),
+    h('p', { class: 'muted' }, 'Cherchez un titre et importez-le directement, sans copier de lien.'),
+    form, results);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const q = input.value.trim();
+    if (!q) return;
+    submit.disabled = true;
+    results.innerHTML = '';
+    results.append(h('div', { class: 'import-status' }, spinner(), h('span', {}, 'Recherche en cours…')));
+    try {
+      const { results: list } = await api.get(`/api/import/search?q=${encodeURIComponent(q)}`);
+      results.innerHTML = '';
+      if (!list.length) { results.append(h('p', { class: 'muted' }, 'Aucun résultat.')); }
+      else list.forEach((r) => results.append(resultRow(r)));
+    } catch (ex) {
+      results.innerHTML = '';
+      results.append(h('div', { class: 'import-status error' },
+        h('span', { html: icon('alert-circle', 20) }), h('span', {}, ex.message)));
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  return panel;
+}
+
+function resultRow(r) {
+  const thumb = h('div', { class: 'yt-thumb' });
+  const img = h('img', { src: r.thumbnail, alt: '', loading: 'lazy' });
+  // Si la miniature ne charge pas (pas d'accès externe), repli sur une icône.
+  img.addEventListener('error', () => { thumb.classList.add('cover-empty'); thumb.innerHTML = icon('music-2', 20); });
+  thumb.append(img);
+
+  const importBtn = h('button', { class: 'btn btn-secondary btn-sm yt-import-btn' }, 'Importer');
+  const sub = [r.artist, r.duration ? fmtTime(r.duration) : null].filter(Boolean).join(' · ');
+  const row = h('div', { class: 'yt-result' },
+    thumb,
+    h('div', { class: 'yt-result-meta' },
+      h('div', { class: 'yt-result-title' }, r.title),
+      h('div', { class: 'yt-result-sub' }, sub)),
+    importBtn);
+
+  importBtn.addEventListener('click', async () => {
+    importBtn.disabled = true;
+    importBtn.textContent = '0 %';
+    try {
+      const { job } = await api.post('/api/import/youtube', { url: r.url });
+      await pollJob(job.id,
+        (p, status) => { importBtn.textContent = status === 'processing' ? '…' : `${Math.round(p)} %`; },
+        (song) => {
+          importBtn.textContent = 'Ajouté ✓';
+          importBtn.classList.add('yt-import-done');
+          row.classList.add('yt-result-done');
+          toast(`« ${song.title} » ajouté à votre bibliothèque.`, 'success');
+        },
+        (err) => { importBtn.disabled = false; importBtn.textContent = 'Réessayer'; toast(err, 'error'); });
+    } catch (ex) {
+      importBtn.disabled = false; importBtn.textContent = 'Réessayer'; toast(ex.message, 'error');
+    }
+  });
+  return row;
+}
+
+// Suivi d'un job d'import (partagé par la recherche et l'import par lien).
+async function pollJob(jobId, onProgress, onDone, onError) {
+  try {
+    const { job } = await api.get(`/api/import/youtube/${jobId}`);
+    onProgress(job.progress, job.status);
+    if (job.status === 'error') return onError(job.error);
+    if (job.status === 'done') return onDone(job.song);
+    setTimeout(() => pollJob(jobId, onProgress, onDone, onError), 1000);
+  } catch (ex) {
+    onError(ex.message);
+  }
 }
 
 // ---------------------------------------------------------------- Fichier

@@ -1,6 +1,6 @@
 // Import YouTube : exécution de yt-dlp avec suivi de progression.
 // Les jobs vivent en mémoire (Map) et sont interrogés par polling côté client.
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
@@ -8,6 +8,42 @@ import { TMP_DIR } from './media.js';
 
 const jobs = new Map();
 const JOB_TTL = 10 * 60_000; // un job terminé reste consultable 10 min
+
+/**
+ * Recherche sur YouTube (contenu identique à YouTube Music) via yt-dlp.
+ * `--flat-playlist` : résultats rapides sans extraire chaque vidéo.
+ * Retourne [{ id, url, title, artist, duration, thumbnail }].
+ */
+export function searchYoutube(query, limit = 12) {
+  const q = String(query).trim().slice(0, 120).replace(/[\r\n]/g, ' ');
+  return new Promise((resolve, reject) => {
+    execFile('yt-dlp', [
+      '--dump-json', '--flat-playlist', '--no-warnings',
+      `ytsearch${limit}:${q}`,
+    ], { timeout: 30_000, maxBuffer: 20 * 1024 * 1024 }, (err, stdout) => {
+      if (err && !stdout) return reject(err);
+      const results = [];
+      for (const line of stdout.split('\n')) {
+        if (!line.trim()) continue;
+        let e;
+        try { e = JSON.parse(line); } catch { continue; }
+        if (!e.id) continue;
+        // L'artiste exact sera extrait à l'import ; ici on affiche la chaîne
+        // (« … - Topic » pour la musique), nettoyée du suffixe « - Topic ».
+        const channel = (e.uploader || e.channel || '').replace(/\s*-\s*Topic$/i, '') || null;
+        results.push({
+          id: e.id,
+          url: `https://www.youtube.com/watch?v=${e.id}`,
+          title: e.title || 'Sans titre',
+          artist: channel,
+          duration: Number(e.duration) || null,
+          thumbnail: `https://i.ytimg.com/vi/${e.id}/mqdefault.jpg`,
+        });
+      }
+      resolve(results);
+    });
+  });
+}
 
 export function getJob(id) {
   return jobs.get(id) ?? null;

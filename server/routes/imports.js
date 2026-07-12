@@ -10,11 +10,24 @@ import { ah, requireAuth, cleanText } from '../lib/util.js';
 import {
   AUDIO_DIR, TMP_DIR, probe, toMp3, extractEmbeddedCover, processCover, safeUnlink, randomName,
 } from '../lib/media.js';
-import { startJob, getJob, isYoutubeUrl } from '../lib/ytdlp.js';
+import { startJob, getJob, isYoutubeUrl, searchYoutube } from '../lib/ytdlp.js';
 import { serializeSong, SONG_SELECT } from '../lib/songs.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// Recherche YouTube Music : renvoie une liste de titres à importer en un clic.
+router.get('/search', ah(async (req, res) => {
+  const q = cleanText(req.query?.q, 120);
+  if (!q) return res.json({ results: [] });
+  try {
+    const results = await searchYoutube(q, 12);
+    res.json({ results });
+  } catch (err) {
+    console.error('[recherche yt] échec :', err.message);
+    res.status(502).json({ error: 'Recherche impossible (pas d’accès à YouTube depuis le serveur ?).' });
+  }
+}));
 
 const upload = multer({
   dest: TMP_DIR,
