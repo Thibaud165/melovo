@@ -81,6 +81,27 @@ db.exec(`
     played_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Statistiques d'écoute (temps réellement écouté).
+  -- Total cumulé par utilisateur (jamais purgé, même si un son est supprimé).
+  CREATE TABLE IF NOT EXISTS user_stats (
+    user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    total_seconds REAL NOT NULL DEFAULT 0
+  );
+  -- Temps écouté par son (pour le top 3 et le nombre de sons différents).
+  CREATE TABLE IF NOT EXISTS listen_song (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    song_id INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+    seconds REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, song_id)
+  );
+  -- Temps écouté par jour (pour le graphique 30 jours ; purgé au-delà).
+  CREATE TABLE IF NOT EXISTS listen_day (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day     TEXT NOT NULL,
+    seconds REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, day)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_songs_owner        ON songs(owner_id);
   CREATE INDEX IF NOT EXISTS idx_tracks_playlist    ON playlist_tracks(playlist_id, position);
   CREATE INDEX IF NOT EXISTS idx_tracks_song        ON playlist_tracks(song_id);
@@ -95,6 +116,10 @@ const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name)
 if (!userCols.includes('theme_color')) {
   // Couleur de fond du thème (null = base espresso par défaut).
   db.exec('ALTER TABLE users ADD COLUMN theme_color TEXT');
+}
+if (!userCols.includes('theme_intensity')) {
+  // Intensité de la teinte de fond (0 -> 1). Null = valeur par défaut côté app.
+  db.exec('ALTER TABLE users ADD COLUMN theme_intensity REAL');
 }
 const songCols = db.prepare('PRAGMA table_info(songs)').all().map((c) => c.name);
 if (!songCols.includes('sort_order')) {

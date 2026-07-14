@@ -25,6 +25,23 @@ export function recordPlay(kind, id) {
   api.post('/api/history', { kind, id }).catch(() => {});
 }
 
+/**
+ * Envoie un lot de secondes réellement écoutées (statistiques).
+ * sendBeacon survit à la fermeture de l'onglet ; sinon repli sur fetch.
+ */
+export function sendListen(songId, seconds) {
+  const s = Math.round(seconds);
+  if (!songId || s < 1) return;
+  const body = JSON.stringify({ song_id: songId, seconds: s });
+  try {
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/stats/listen', new Blob([body], { type: 'application/json' }));
+      return;
+    }
+  } catch { /* repli ci-dessous */ }
+  api.post('/api/stats/listen', { song_id: songId, seconds: s }).catch(() => {});
+}
+
 // ---- Thème : la base espresso est figée, seul --accent est personnalisable. ----
 
 function hexToHsl(hex) {
@@ -66,28 +83,33 @@ export function applyAccent(hex) {
 }
 
 /**
- * Applique la couleur de fond du thème : on ne garde que la TEINTE (et une
- * saturation adoucie) de la couleur choisie, puis on regénère toute la gamme
- * (fond, sidebar/barre de lecture, surfaces, filets) avec les mêmes écarts de
- * luminosité que la base espresso — les nuances entre sections sont préservées.
- * `null` -> retour à la base espresso par défaut.
+ * Applique la couleur de fond du thème en gardant la TEINTE choisie et en
+ * regénérant la gamme (fond, sidebar/barre, surfaces, filets) avec les mêmes
+ * écarts de luminosité que l'espresso — les nuances entre sections sont
+ * préservées. `intensity` (0→1) contrôle la présence de la couleur : 0 = quasi
+ * neutre (espresso à peine teinté), 1 = couleur bien affirmée. `null` -> défaut.
  */
-export function applyTheme(hex) {
+export const DEFAULT_THEME_INTENSITY = 0.45;
+
+export function applyTheme(hex, intensity = DEFAULT_THEME_INTENSITY) {
   const root = document.documentElement.style;
   const vars = ['--bg', '--bg-elevated', '--surface', '--surface-hover', '--border'];
   if (!hex) { vars.forEach((v) => root.removeProperty(v)); return; }
-  const [h, s] = hexToHsl(hex);
-  const sat = Math.min(Math.max(s, 6), 30); // teinte présente mais jamais criarde
-  // Gamme calquée sur l'espresso : L 7.5 / 10 / 12 / 15 / 19, S +1 par palier.
-  root.setProperty('--bg', hslToHex(h, sat, 7.5));
-  root.setProperty('--bg-elevated', hslToHex(h, sat + 1, 10));
-  root.setProperty('--surface', hslToHex(h, sat + 2, 12));
-  root.setProperty('--surface-hover', hslToHex(h, sat + 3, 15));
-  root.setProperty('--border', hslToHex(h, sat + 4, 19));
+  const [h] = hexToHsl(hex);
+  const k = Math.min(1, Math.max(0, intensity));
+  // Saturation pilotée par l'intensité : 5 % (neutre) → 60 % (couleur affirmée).
+  const sat = 5 + k * 55;
+  // Un peu de luminosité en plus à haute intensité pour que la couleur « ressorte ».
+  const lift = k * 2;
+  root.setProperty('--bg', hslToHex(h, sat, 7 + lift));
+  root.setProperty('--bg-elevated', hslToHex(h, sat + 1, 10 + lift));
+  root.setProperty('--surface', hslToHex(h, sat + 2, 12.5 + lift));
+  root.setProperty('--surface-hover', hslToHex(h, sat + 3, 16 + lift));
+  root.setProperty('--border', hslToHex(h, sat + 4, 20 + lift));
 }
 
 /** Pastille d'aperçu lisible pour une couleur de thème (même teinte, plus claire). */
 export function themeSwatchColor(hex) {
   const [h, s] = hexToHsl(hex);
-  return hslToHex(h, Math.min(Math.max(s, 6), 30) + 6, 26);
+  return hslToHex(h, Math.min(Math.max(s, 20), 60), 30);
 }

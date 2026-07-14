@@ -3,7 +3,7 @@
 // Deux surfaces : barre fixe (desktop) et mini-lecteur + plein écran (mobile).
 import { h, fmtTime, cover } from './ui.js';
 import { icon } from './icons.js';
-import { isMobile, recordPlay } from './state.js';
+import { isMobile, recordPlay, sendListen } from './state.js';
 
 const audio = () => document.getElementById('audio');
 
@@ -271,17 +271,18 @@ function wireAudioOnce() {
   wired = true;
   const a = audio();
   applyVolume();
-  a.addEventListener('timeupdate', () => { updateProgress(); updateNpProgress(); savePlaybackThrottled(); });
+  a.addEventListener('timeupdate', () => { updateProgress(); updateNpProgress(); savePlaybackThrottled(); trackListen(); });
   a.addEventListener('durationchange', () => { updateProgress(); updateNpProgress(); });
   // play/pause : rafraîchit la surface, notifie les lignes, mémorise la position.
   const onPlayState = () => {
     updateBar();
     document.dispatchEvent(new CustomEvent('melovo:trackchange'));
     savePlayback();
+    if (a.paused) flushListen(); // on remonte le temps écouté à la pause
   };
   // Sauvegarde finale avant fermeture de l'onglet.
-  window.addEventListener('pagehide', savePlayback);
-  window.addEventListener('beforeunload', savePlayback);
+  window.addEventListener('pagehide', () => { flushListen(); savePlayback(); });
+  window.addEventListener('beforeunload', () => { flushListen(); savePlayback(); });
   a.addEventListener('play', onPlayState);
   a.addEventListener('pause', onPlayState);
   a.addEventListener('ended', () => next(true));
@@ -408,6 +409,32 @@ function toggleMute() {
   const a = audio();
   a.muted = !a.muted;
   updateVolumeUI();
+}
+
+// ------------------------------------------------------------------ Temps écouté
+// On additionne les secondes réellement lues (on ignore les sauts/seek en
+// vérifiant que l'écart entre deux ticks reste petit), puis on remonte le total
+// par lots (toutes les ~20 s, à la pause, au changement de titre, à la fermeture).
+let listenSongId = null;
+let listenSeconds = 0;
+let lastTick = null;
+
+function trackListen() {
+  const a = audio();
+  const s = player.song;
+  if (!s) { lastTick = null; return; }
+  if (listenSongId !== s.id) { flushListen(); listenSongId = s.id; lastTick = null; }
+  if (!a.paused && lastTick != null) {
+    const d = a.currentTime - lastTick;
+    if (d > 0 && d < 2) listenSeconds += d; // écart normal = lecture réelle
+  }
+  lastTick = a.currentTime;
+  if (listenSeconds >= 20) flushListen();
+}
+
+function flushListen() {
+  if (listenSongId && listenSeconds >= 1) sendListen(listenSongId, listenSeconds);
+  listenSeconds = 0;
 }
 
 function updateMediaSession(song) {

@@ -1,6 +1,7 @@
-// Import : recherche YouTube Music (import en un clic), fichier MP3/MP4
-// (brouillon éditable), ou lien YouTube (progression).
+// Import : recherche YouTube Music (import en un clic), migration d'une playlist
+// (YouTube/Deezer), fichier MP3/MP4 (brouillon éditable), ou lien YouTube.
 import { api } from '../api.js';
+import { refreshPlaylists } from '../state.js';
 import { h, toast, spinner, fmtTime } from '../ui.js';
 import { icon } from '../icons.js';
 import { coverPicker } from '../components.js';
@@ -8,9 +9,79 @@ import { coverPicker } from '../components.js';
 export function importView(root) {
   root.append(h('h1', { class: 'page-title' }, 'Importer'));
   root.append(searchImportPanel());
+  root.append(migratePanel());
   const grid = h('div', { class: 'import-grid' });
   root.append(grid);
   grid.append(fileImportPanel(), youtubeImportPanel());
+}
+
+// ---------------------------------------------------------------- Migration de playlist
+function migratePanel() {
+  const input = h('input', { class: 'input', type: 'url',
+    placeholder: 'Lien d’une playlist YouTube Music ou Deezer (publique)', 'aria-label': 'Lien de playlist' });
+  const submit = h('button', { class: 'btn btn-primary', type: 'submit' }, 'Importer la playlist');
+  const form = h('form', { class: 'yt-form' }, input, submit);
+  const status = h('div', { class: 'yt-status' });
+
+  const panel = h('section', { class: 'import-panel import-migrate' },
+    h('h2', { class: 'section-title' }, 'Migrer une playlist'),
+    h('p', { class: 'muted' },
+      'Colle le lien d’une playlist YouTube Music (import direct) ou d’une playlist Deezer publique ' +
+      '(chaque titre est retrouvé sur YouTube). Les titres arrivent dans ta bibliothèque et une playlist est créée.'),
+    form, status);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = input.value.trim();
+    if (!url) return;
+    submit.disabled = true; input.disabled = true;
+    status.innerHTML = '';
+    const label = h('span', {}, 'Analyse de la playlist…');
+    const fill = h('div', { class: 'yt-bar-fill' });
+    status.append(h('div', { class: 'import-status' }, spinner(), label), h('div', { class: 'yt-bar' }, fill));
+
+    const done = () => { submit.disabled = false; input.disabled = false; };
+    const showError = (msg) => {
+      status.innerHTML = '';
+      status.append(h('div', { class: 'import-status error' },
+        h('span', { html: icon('alert-circle', 20) }), h('span', {}, msg)));
+      done();
+    };
+
+    const poll = async (jobId) => {
+      try {
+        const { job } = await api.get(`/api/import/playlist/${jobId}`);
+        if (job.status === 'error') return showError(job.error);
+        if (job.total) {
+          const pct = Math.round((job.done / job.total) * 100);
+          fill.style.width = `${pct}%`;
+          label.textContent = `Import de « ${job.name || 'la playlist'} » — ${job.done} / ${job.total} titres…`;
+        }
+        if (job.status === 'done') {
+          await refreshPlaylists().catch(() => {});
+          status.innerHTML = '';
+          const msg = job.failed
+            ? `Playlist « ${job.name} » importée (${job.done - job.failed}/${job.total} titres, ${job.failed} introuvables).`
+            : `Playlist « ${job.name} » importée (${job.done} titres).`;
+          status.append(h('div', { class: 'import-status success' },
+            h('span', { html: icon('check-circle-2', 20) }),
+            h('a', { href: `#/playlist/${job.playlist_id}` }, msg)));
+          toast('Playlist importée.', 'success');
+          input.value = '';
+          done();
+          return;
+        }
+        setTimeout(() => poll(jobId), 1500);
+      } catch (ex) { showError(ex.message); }
+    };
+
+    try {
+      const { job } = await api.post('/api/import/playlist', { url });
+      poll(job.id);
+    } catch (ex) { showError(ex.message); }
+  });
+
+  return panel;
 }
 
 // ---------------------------------------------------------------- Recherche YouTube Music

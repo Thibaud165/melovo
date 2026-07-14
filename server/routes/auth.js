@@ -25,6 +25,7 @@ function publicUser(u) {
     must_change_password: !!u.must_change_password,
     accent_color: u.accent_color,
     theme_color: u.theme_color ?? null,
+    theme_intensity: u.theme_intensity ?? null,
   };
 }
 
@@ -86,14 +87,18 @@ router.put('/accent', requireAuth, (req, res) => {
   res.json({ ok: true, accent_color: color });
 });
 
-// Couleur de fond du thème (null / vide = retour à la base espresso par défaut).
+// Couleur de fond du thème + intensité (null / vide = retour au défaut espresso).
 router.put('/theme', requireAuth, (req, res) => {
   const color = parseHexColor(req.body?.theme_color); // null accepté = défaut
   if (color === undefined) {
     return res.status(400).json({ error: 'Couleur invalide (format attendu : #RRGGBB).' });
   }
-  db.prepare('UPDATE users SET theme_color = ? WHERE id = ?').run(color, req.session.userId);
-  res.json({ ok: true, theme_color: color });
+  let intensity = req.body?.theme_intensity;
+  intensity = intensity == null ? null : Math.min(1, Math.max(0, Number(intensity)));
+  if (intensity !== null && !Number.isFinite(intensity)) intensity = null;
+  db.prepare('UPDATE users SET theme_color = ?, theme_intensity = ? WHERE id = ?')
+    .run(color, intensity, req.session.userId);
+  res.json({ ok: true, theme_color: color, theme_intensity: intensity });
 });
 
 export default router;

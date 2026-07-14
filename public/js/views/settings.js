@@ -1,6 +1,6 @@
 // Paramètres : couleur d'accent, couleur de fond du thème, mot de passe.
 import { api } from '../api.js';
-import { state, applyAccent, applyTheme, themeSwatchColor } from '../state.js';
+import { state, applyAccent, applyTheme, themeSwatchColor, DEFAULT_THEME_INTENSITY } from '../state.js';
 import { h, toast } from '../ui.js';
 import { icon } from '../icons.js';
 
@@ -34,20 +34,8 @@ export function settingsView(root) {
     allowNone: false,
   }));
 
-  // --- Couleur de fond ---------------------------------------------------
-  root.append(colorSection({
-    title: 'Couleur de fond',
-    hint: 'Teinte le fond de toute l’app en conservant les nuances entre sections (sidebar et barre de lecture plus claires, zone centrale plus sombre).',
-    presets: THEME_PRESETS,
-    initial: state.me.theme_color,
-    preview: (v) => applyTheme(v),
-    save: async (v) => {
-      await api.put('/api/auth/theme', { theme_color: v ?? '' });
-      state.me.theme_color = v;
-      toast('Couleur de fond enregistrée.', 'success');
-    },
-    allowNone: true,
-  }));
+  // --- Couleur de fond (+ intensité) ------------------------------------
+  root.append(themeSection());
 
   // --- Mot de passe ----------------------------------------------------
   const current = h('input', { class: 'input', type: 'password', autocomplete: 'current-password' });
@@ -73,6 +61,73 @@ export function settingsView(root) {
 
   root.append(h('section', { class: 'settings-section' },
     h('h2', { class: 'section-title' }, 'Mot de passe'), form));
+}
+
+/**
+ * Section « Couleur de fond » : teinte + slider d'intensité (contraste de la
+ * couleur), aperçu en direct sur toute l'app, enregistrement des deux valeurs.
+ */
+function themeSection() {
+  let value = state.me.theme_color ?? null;
+  let intensity = state.me.theme_intensity ?? DEFAULT_THEME_INTENSITY;
+  let customValue = (value && !THEME_PRESETS.some((p) => p.value === value)) ? value : null;
+
+  const apply = () => applyTheme(value, intensity);
+
+  // Rangée de pastilles (dont « aucune » = espresso) + pastille personnalisée.
+  const swatches = [];
+  const row = h('div', { class: 'color-picker' });
+  const mark = () => {
+    const isPreset = THEME_PRESETS.some((p) => p.value === value);
+    swatches.forEach((s) => s.classList.toggle('selected', s.dataset.value === String(value)));
+    customWrap.classList.toggle('selected', !isPreset && value && value === customValue);
+    if (!isPreset && value) customWrap.style.background = value;
+  };
+  for (const p of THEME_PRESETS) {
+    const s = h('button', { type: 'button', class: `swatch${p.value === null ? ' swatch-none' : ''}`,
+      'data-value': String(p.value), title: p.name,
+      style: p.value === null ? null : `background:${p.swatch}`,
+      html: p.value === null ? icon('x', 14) : '' });
+    s.addEventListener('click', () => { value = p.value; apply(); mark(); updateSliderState(); });
+    swatches.push(s); row.append(s);
+  }
+  const customInput = h('input', { type: 'color', class: 'color-custom-input',
+    value: customValue ?? '#3B4C6B', 'aria-label': 'Couleur personnalisée' });
+  const customWrap = h('label', { class: 'swatch color-custom-wrap', title: 'Couleur personnalisée' },
+    h('span', { class: 'color-custom-pencil', html: icon('pencil', 13) }), customInput);
+  customInput.addEventListener('input', () => {
+    customValue = customInput.value.toUpperCase(); value = customValue; apply(); mark(); updateSliderState();
+  });
+  if (customValue) customWrap.style.background = customValue;
+  row.append(customWrap);
+
+  // Slider d'intensité (contraste de la couleur).
+  const slider = h('input', { type: 'range', class: 'range', min: '0', max: '100', step: '1',
+    value: String(Math.round(intensity * 100)), 'aria-label': 'Intensité de la couleur' });
+  slider.addEventListener('input', () => { intensity = Number(slider.value) / 100; apply(); });
+  const sliderWrap = h('div', { class: 'range-row' },
+    h('span', { class: 'muted' }, 'Discret'), slider, h('span', { class: 'muted' }, 'Affirmé'));
+  // Le slider n'a de sens qu'avec une couleur choisie.
+  const updateSliderState = () => { slider.disabled = !value; sliderWrap.classList.toggle('disabled', !value); };
+  updateSliderState();
+  mark();
+
+  const saveBtn = h('button', { class: 'btn btn-primary', onclick: async () => {
+    try {
+      await api.put('/api/auth/theme', { theme_color: value ?? '', theme_intensity: value ? intensity : null });
+      state.me.theme_color = value;
+      state.me.theme_intensity = value ? intensity : null;
+      toast('Thème enregistré.', 'success');
+    } catch (ex) { toast(ex.message, 'error'); }
+  } }, 'Enregistrer');
+
+  return h('section', { class: 'settings-section' },
+    h('h2', { class: 'section-title' }, 'Couleur de fond'),
+    h('p', { class: 'muted' }, 'Teinte tout le fond de l’app en gardant les nuances entre sections. Le curseur règle l’intensité de la couleur (de discrète à affirmée).'),
+    row,
+    h('label', { class: 'label' }, 'Intensité'),
+    sliderWrap,
+    h('div', { class: 'settings-actions' }, saveBtn));
 }
 
 /**

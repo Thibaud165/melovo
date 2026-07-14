@@ -24,7 +24,33 @@ await seedAdmin(ADMIN_USERNAME, ADMIN_PASSWORD);
 
 const app = express();
 app.disable('x-powered-by');
+// Un seul proxy devant nous (tunnel Cloudflare -> melovo:8080) : on lui fait
+// confiance pour X-Forwarded-Proto (HTTPS) et X-Forwarded-For (IP réelle).
 app.set('trust proxy', 1);
+
+// En-têtes de sécurité (léger, sans dépendance). CSP adaptée à l'app :
+// scripts/styles internes, pochettes locales + miniatures YouTube, audio local.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  // HSTS uniquement en HTTPS (derrière le tunnel).
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "img-src 'self' data: https://i.ytimg.com https://*.ytimg.com",
+    "media-src 'self' blob:",
+    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self'",
+    "connect-src 'self'",
+    "font-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+  ].join('; '));
+  next();
+});
 
 app.use(express.json({ limit: '1mb' }));
 app.use(session({
@@ -35,8 +61,8 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: false, // HTTP local / Tailscale (pas de TLS terminé ici)
+    sameSite: 'lax',       // protège du CSRF cross-site sur les POST
+    secure: 'auto',        // cookie sécurisé en HTTPS (public), toléré en HTTP LAN
     maxAge: 30 * 86_400_000, // 30 jours
   },
 }));
@@ -48,6 +74,7 @@ app.use('/api/songs', (await import('./routes/songs.js')).default);
 app.use('/api/import', (await import('./routes/imports.js')).default);
 app.use('/api/playlists', (await import('./routes/playlists.js')).default);
 app.use('/api/history', (await import('./routes/history.js')).default);
+app.use('/api/stats', (await import('./routes/stats.js')).default);
 app.use('/api', (await import('./routes/search.js')).default);
 
 // Pochettes servies statiquement, derrière l'authentification.

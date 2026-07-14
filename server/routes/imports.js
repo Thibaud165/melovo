@@ -6,16 +6,30 @@ import path from 'node:path';
 import fsp from 'node:fs/promises';
 import crypto from 'node:crypto';
 import multer from 'multer';
+import rateLimit from 'express-rate-limit';
 import db from '../db.js';
 import { ah, requireAuth, cleanText } from '../lib/util.js';
 import {
   AUDIO_DIR, TMP_DIR, probe, toMp3, extractEmbeddedCover, processCover, safeUnlink, randomName,
 } from '../lib/media.js';
 import { startJob, getJob, isYoutubeUrl, searchYoutube } from '../lib/ytdlp.js';
+import { startPlaylistImport, getMigrateJob, detectPlaylistSource } from '../lib/migrate.js';
 import { serializeSong, SONG_SELECT } from '../lib/songs.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// Anti-abus : les opérations lourdes (téléchargement / streaming / recherche
+// yt-dlp) sont plafonnées par IP. Généreux pour un usage normal, mais borne un
+// compte qui voudrait saturer le Pi.
+const heavyLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de requêtes. Patientez un instant.' },
+});
+router.use(['/preview', '/search', '/youtube', '/upload'], heavyLimiter);
 
 // Aperçu audio d'un résultat : le Pi diffuse le son en direct (yt-dlp -> ffmpeg
 // -> MP3 en streaming). Transcodé en MP3 pour être lisible partout (dont iOS),
@@ -52,6 +66,32 @@ router.get('/preview/:id', (req, res) => {
   res.on('close', kill);           // client parti / lecture stoppée
   const guard = setTimeout(kill, 12 * 60_000); // sécurité anti-processus zombie
   guard.unref?.();
+});
+
+// Migration : importe une playlist entière depuis un lien (YouTube/YT Music
+// direct, ou Deezer public via matching YouTube).
+function publicMigrateJob(j) {
+  return {
+    id: j.id, status: j.status, total: j.total, done: j.done, failed: j.failed,
+    error: j.error, playlist_id: j.playlistId, name: j.name,
+  };
+}
+router.post('/playlist', (req, res) => {
+  const url = cleanText(req.body?.url, 500);
+  if (!url || !detectPlaylistSource(url)) {
+    return res.status(400).json({
+      error: 'Collez le lien d’une playlist YouTube / YouTube Music, ou d’une playlist Deezer publique.',
+    });
+  }
+  const job = startPlaylistImport(url, req.session.userId);
+  res.status(202).json({ job: publicMigrateJob(job) });
+});
+router.get('/playlist/:id', (req, res) => {
+  const job = getMigrateJob(req.params.id);
+  if (!job || job.userId !== req.session.userId) {
+    return res.status(404).json({ error: 'Import introuvable (expiré ?).' });
+  }
+  res.json({ job: publicMigrateJob(job) });
 });
 
 // Recherche YouTube Music : renvoie une liste de titres à importer en un clic.

@@ -12,6 +12,7 @@ import { libraryView } from './views/library.js';
 import { playlistsView } from './views/playlists.js';
 import { playlistView, openEditPlaylist } from './views/playlist.js';
 import { settingsView } from './views/settings.js';
+import { statsView } from './views/stats.js';
 import { adminView } from './views/admin.js';
 
 const app = document.getElementById('app');
@@ -29,7 +30,7 @@ async function boot() {
 function onLoggedIn(user) {
   state.me = user;
   applyAccent(user.accent_color);
-  applyTheme(user.theme_color);
+  applyTheme(user.theme_color, user.theme_intensity ?? undefined);
   if (user.must_change_password) renderChangePassword();
   else startApp();
 }
@@ -227,6 +228,7 @@ function renderSidebarPlaylists() {
 
 function accountMenu(anchor) {
   openMenu(anchor, [
+    { label: 'Statistiques', icon: 'activity', onClick: () => { location.hash = '#/stats'; } },
     { label: 'Paramètres', icon: 'settings', onClick: () => { location.hash = '#/settings'; } },
     state.me.is_admin && { label: 'Administration', icon: 'shield', onClick: () => { location.hash = '#/admin'; } },
     { label: 'Déconnexion', icon: 'log-out', onClick: async () => {
@@ -248,6 +250,7 @@ const routes = [
   [/^#\/library$/, () => libraryView],
   [/^#\/playlist\/(\d+)$/, () => playlistView],
   [/^#\/settings$/, () => settingsView],
+  [/^#\/stats$/, () => statsView],
   [/^#\/admin$/, () => adminView],
 ];
 
