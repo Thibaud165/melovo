@@ -921,14 +921,20 @@ img { display: block; }
 .range-row.disabled { opacity: 0.5; }
 .range {
   -webkit-appearance: none; appearance: none;
-  flex: 1; height: 6px; border-radius: 3px; background: var(--surface); cursor: pointer;
+  flex: 1; height: 6px; border-radius: 3px; cursor: pointer;
+  background: var(--border);           /* piste visible sur le fond des cartes */
 }
+/* Piste explicite (WebKit + Firefox) pour un rendu homogène. */
+.range::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--border); }
+.range::-moz-range-track { height: 6px; border-radius: 3px; background: var(--border); }
 .range::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none;
-  width: 18px; height: 18px; border-radius: 50%; background: var(--accent); border: none; cursor: pointer;
+  -webkit-appearance: none; appearance: none; margin-top: -6px;
+  width: 18px; height: 18px; border-radius: 50%; background: var(--accent);
+  border: 2px solid var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,.4); cursor: pointer;
 }
 .range::-moz-range-thumb {
-  width: 18px; height: 18px; border-radius: 50%; background: var(--accent); border: none; cursor: pointer;
+  width: 18px; height: 18px; border-radius: 50%; background: var(--accent);
+  border: 2px solid var(--bg); cursor: pointer;
 }
 .range:disabled { cursor: not-allowed; }
 
